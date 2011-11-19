@@ -22,6 +22,7 @@
 #include <plat/iic.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
+#include <plat/gpio-cfg.h>
 
 #define HAS_I2C(ID)							\
 	defined(GPIO_I2C##ID##_SDA) && defined(GPIO_I2C##ID##_SCL)
@@ -39,53 +40,59 @@
 		.name			= "i2c-gpio",			\
 		.id			= ID,				\
 		.dev.platform_data	= &i2c##ID##_pdata,		\
+	};								\
+	void s3c_i2c##ID##_cfg_gpio(struct platform_device *dev)	\
+	{								\
+		s3c_gpio_cfgall_range(GPIO_I2C##ID##_SDA, 1,		\
+			S3C_GPIO_INPUT, S3C_GPIO_PULL_NONE);		\
+		s3c_gpio_cfgall_range(GPIO_I2C##ID##_SCL, 1,		\
+			S3C_GPIO_INPUT, S3C_GPIO_PULL_NONE);		\
 	}
 
-	
 #if HAS_I2C(3)
-DEFINE_I2C(3);
+DEFINE_I2C(3)
 #endif
 
 #if HAS_I2C(4)
-DEFINE_I2C(4);
+DEFINE_I2C(4)
 #endif
 
 #if HAS_I2C(5)
-DEFINE_I2C(5);
+DEFINE_I2C(5)
 #endif
 
 #if HAS_I2C(6)
-DEFINE_I2C(6);
+DEFINE_I2C(6)
 #endif
 
 #if HAS_I2C(7)
-DEFINE_I2C(7);
+DEFINE_I2C(7)
 #endif
 
 #if HAS_I2C(8)
-DEFINE_I2C(8);
+DEFINE_I2C(8)
 #endif
 
 #if HAS_I2C(9)
-DEFINE_I2C(9);
+DEFINE_I2C(9)
 #endif
 
 #if HAS_I2C(10)
-DEFINE_I2C(10);
+DEFINE_I2C(10)
 #endif
 
 #if HAS_I2C(11)
-DEFINE_I2C(11);
+DEFINE_I2C(11)
 #endif
 
 #if HAS_I2C(12)
-DEFINE_I2C(12);
+DEFINE_I2C(12)
 #endif
 
 #if HAS_I2C(13)
-DEFINE_I2C(13);
+DEFINE_I2C(13)
 #endif
 
 #if HAS_I2C(14)
-DEFINE_I2C(14);
+DEFINE_I2C(14)
 #endif

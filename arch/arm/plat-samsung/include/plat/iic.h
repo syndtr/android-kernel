@@ -71,6 +71,13 @@ extern void s3c_i2c4_cfg_gpio(struct platform_device *dev);
 extern void s3c_i2c5_cfg_gpio(struct platform_device *dev);
 extern void s3c_i2c6_cfg_gpio(struct platform_device *dev);
 extern void s3c_i2c7_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c8_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c9_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c10_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c11_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c12_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c13_cfg_gpio(struct platform_device *dev);
+extern void s3c_i2c14_cfg_gpio(struct platform_device *dev);
 
 extern struct s3c2410_platform_i2c default_i2c_data;
 
