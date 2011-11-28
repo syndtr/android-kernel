@@ -137,4 +137,8 @@ enum s5p_gpio_number {
 #define ARCH_NR_GPIOS		(S5PV210_MP05(S5PV210_GPIO_MP05_NR) +	\
 				 CONFIG_SAMSUNG_GPIO_EXTRA + 1)
 
+#ifdef CONFIG_MACH_QSS
+#include <mach/gpio-qss.h>
+#endif
+
 #endif /* __ASM_ARCH_GPIO_H */

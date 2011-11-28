@@ -121,6 +121,16 @@ config MACH_SMDKC110
 	  Machine support for Samsung SMDKC110
 	  S5PC110(MCP) is one of package option of S5PV210
 
+config MACH_QSS
+	bool "QSS"
+	select CPU_S5PV210
+	select S5P_GPIO_INT
+	select S3C_DEV_RTC
+	select S3C_DEV_WDT
+	help
+	  Machine support for Samsung SMDKC110
+	  S5PC110(MCP) is one of package option of S5PV210
+
 endmenu
 
 menu "S5PV210 Machines"
