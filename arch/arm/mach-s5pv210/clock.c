@@ -389,11 +389,6 @@ static struct clk init_clocks_off[] = {
 		.enable		= s5pv210_clk_ip1_ctrl,
 		.ctrlbit	= (1<<17),
 	}, {
-		.name		= "lcd",
-		.parent		= &clk_hclk_dsys.clk,
-		.enable		= s5pv210_clk_ip1_ctrl,
-		.ctrlbit	= (1<<0),
-	}, {
 		.name		= "cfcon",
 		.parent		= &clk_hclk_psys.clk,
 		.enable		= s5pv210_clk_ip1_ctrl,
@@ -527,6 +522,11 @@ static struct clk init_clocks[] = {
 		.ctrlbit	= (1 << 5),
 		.enable		= s5pv210_clk_ip0_ctrl,
 		.ops		= &clk_hclk_imem_ops,
+	}, {
+		.name		= "lcd",
+		.parent		= &clk_hclk_dsys.clk,
+		.enable		= s5pv210_clk_ip1_ctrl,
+		.ctrlbit	= (1<<0),
 	}, {
 		.name		= "uart",
 		.devname	= "s5pv210-uart.0",
