@@ -101,6 +101,9 @@ static void __init qss_map_io(void)
 
 static void __init qss_machine_init(void)
 {
+	/* initialize gpios */
+	qss_gpio_init();
+
 	s3c_pm_init();
 
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));

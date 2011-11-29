@@ -26,7 +26,7 @@ obj-$(CONFIG_MACH_TORBRECK)	+= mach-torbreck.o
 
 # qss
 
-obj-$(CONFIG_MACH_QSS)		+= mach-qss.o
+obj-$(CONFIG_MACH_QSS)		+= mach-qss.o qss-gpio.o
 
 # device support
 

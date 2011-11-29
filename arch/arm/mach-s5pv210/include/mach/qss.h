@@ -12,4 +12,8 @@
 #ifndef __QSS_H
 #define __QSS_H
 
+/* inits */
+
+void qss_gpio_init(void) __init;
+
 #endif
