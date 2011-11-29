@@ -45,6 +45,62 @@
 #define gpio_dbg(x...) printk(KERN_DEBUG x)
 #endif
 
+static int samsung_gpio_slp_setpull_updown(struct samsung_gpio_chip *chip,
+				unsigned int off, samsung_gpio_pull_t pull)
+{
+	void __iomem *reg = chip->base + 0x14;
+	int shift = off * 2;
+	u32 pup;
+
+	pup = __raw_readl(reg);
+	pup &= ~(3 << shift);
+	pup |= pull << shift;
+	__raw_writel(pup, reg);
+
+	return 0;
+}
+
+static samsung_gpio_pull_t samsung_gpio_slp_getpull_updown(struct samsung_gpio_chip *chip,
+						unsigned int off)
+{
+	void __iomem *reg = chip->base + 0x14;
+	int shift = off * 2;
+	u32 pup = __raw_readl(reg);
+
+	pup >>= shift;
+	pup &= 0x3;
+
+	return (__force samsung_gpio_pull_t)pup;
+}
+
+static int samsung_gpio_slp_setcfg(struct samsung_gpio_chip *chip,
+				    unsigned int off, unsigned int cfg)
+{
+	void __iomem *reg = chip->base + 0x10;
+	unsigned int shift = off * 2;
+	u32 con;
+
+	con = __raw_readl(reg);
+	con &= ~(0x3 << shift);
+	con |= cfg << shift;
+	__raw_writel(con, reg);
+
+	return 0;
+}
+
+static unsigned int samsung_gpio_slp_getcfg(struct samsung_gpio_chip *chip,
+					     unsigned int off)
+{
+	void __iomem *reg = chip->base + 0x10;
+	int shift = off * 2;
+	u32 con = __raw_readl(reg);
+
+	con >>= shift;
+	con &= 0x3;
+
+	return con;
+}
+
 int samsung_gpio_setpull_updown(struct samsung_gpio_chip *chip,
 				unsigned int off, samsung_gpio_pull_t pull)
 {
@@ -448,6 +504,18 @@ static struct samsung_gpio_cfg s3c24xx_gpiocfg_banka = {
 	.get_config	= s3c24xx_gpio_getcfg_abank,
 };
 #endif
+
+static struct samsung_gpio_cfg s5pv210_gpio_cfg = {
+	.cfg_eint	= 0xF,
+	.set_pull	= samsung_gpio_setpull_updown,
+	.get_pull	= samsung_gpio_getpull_updown,
+	.set_config	= samsung_gpio_setcfg_4bit,
+	.get_config	= samsung_gpio_getcfg_4bit,
+	.slp_set_pull	= samsung_gpio_slp_setpull_updown,
+	.slp_get_pull	= samsung_gpio_slp_getpull_updown,
+	.slp_set_config	= samsung_gpio_slp_setcfg,
+	.slp_get_config	= samsung_gpio_slp_getcfg,
+};
 
 static struct samsung_gpio_cfg exynos4_gpio_cfg = {
 	.set_pull	= exynos4_gpio_setpull,
@@ -2063,6 +2131,7 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 	}, {
 		.base	= (S5P_VA_GPIO + 0xC00),
 		.irq_base = IRQ_EINT(0),
+		.config	= &samsung_gpio_cfgs[3],
 		.chip	= {
 			.base	= S5PV210_GPH0(0),
 			.ngpio	= S5PV210_GPIO_H0_NR,
@@ -2072,6 +2141,7 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 	}, {
 		.base	= (S5P_VA_GPIO + 0xC20),
 		.irq_base = IRQ_EINT(8),
+		.config	= &samsung_gpio_cfgs[3],
 		.chip	= {
 			.base	= S5PV210_GPH1(0),
 			.ngpio	= S5PV210_GPIO_H1_NR,
@@ -2081,6 +2151,7 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 	}, {
 		.base	= (S5P_VA_GPIO + 0xC40),
 		.irq_base = IRQ_EINT(16),
+		.config	= &samsung_gpio_cfgs[3],
 		.chip	= {
 			.base	= S5PV210_GPH2(0),
 			.ngpio	= S5PV210_GPIO_H2_NR,
@@ -2090,6 +2161,7 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 	}, {
 		.base	= (S5P_VA_GPIO + 0xC60),
 		.irq_base = IRQ_EINT(24),
+		.config	= &samsung_gpio_cfgs[3],
 		.chip	= {
 			.base	= S5PV210_GPH3(0),
 			.ngpio	= S5PV210_GPIO_H3_NR,
@@ -2435,7 +2507,7 @@ static __init int samsung_gpiolib_init(void)
 
 		for (i = 0; i < nr_chips; i++, chip++) {
 			if (!chip->config) {
-				chip->config = &samsung_gpio_cfgs[3];
+				chip->config = &s5pv210_gpio_cfg;
 				chip->group = group++;
 			}
 		}
@@ -2602,6 +2674,108 @@ samsung_gpio_pull_t s3c_gpio_getpull(unsigned int pin)
 	return (__force samsung_gpio_pull_t)pup;
 }
 EXPORT_SYMBOL(s3c_gpio_getpull);
+
+#define S3C_GPIO_NOSLP_ERR(x) \
+	printk(KERN_ERR "S3C: GPIO: Pin %d doesn't support power down mode\n", x)
+
+int s3c_gpio_slp_cfgpin(unsigned int pin, unsigned int config)
+{
+	struct samsung_gpio_chip *chip = samsung_gpiolib_getchip(pin);
+	unsigned long flags;
+	int offset;
+	int ret;
+
+	if (!chip)
+		return -EINVAL;
+
+	if (!chip->config->slp_set_config) {
+		S3C_GPIO_NOSLP_ERR(pin);
+		return -EINVAL;
+	}
+
+	offset = pin - chip->chip.base;
+
+	samsung_gpio_lock(chip, flags);
+	ret = chip->config->slp_set_config(chip, offset, config);
+	samsung_gpio_unlock(chip, flags);
+
+	return ret;
+}
+EXPORT_SYMBOL(s3c_gpio_slp_cfgpin);
+
+unsigned s3c_gpio_slp_getcfg(unsigned int pin)
+{
+	struct samsung_gpio_chip *chip = samsung_gpiolib_getchip(pin);
+	unsigned long flags;
+	unsigned ret = 0;
+	int offset;
+
+	if (chip) {
+		if (!chip->config->slp_get_config) {
+			S3C_GPIO_NOSLP_ERR(pin);
+			goto out;
+		}
+		offset = pin - chip->chip.base;
+
+		samsung_gpio_lock(chip, flags);
+		ret = chip->config->slp_get_config(chip, offset);
+		samsung_gpio_unlock(chip, flags);
+	}
+
+out:
+	return ret;
+}
+EXPORT_SYMBOL(s3c_gpio_slp_getcfg);
+
+int s3c_gpio_slp_setpull(unsigned int pin, samsung_gpio_pull_t pull)
+{
+	struct samsung_gpio_chip *chip = samsung_gpiolib_getchip(pin);
+	unsigned long flags;
+	int offset, ret;
+
+	if (!chip)
+		return -EINVAL;
+
+	if (!chip->config->slp_set_pull) {
+		S3C_GPIO_NOSLP_ERR(pin);
+		return -EINVAL;
+	}
+
+	offset = pin - chip->chip.base;
+
+	samsung_gpio_lock(chip, flags);
+	ret = chip->config->slp_set_pull(chip, offset, pull);
+	samsung_gpio_unlock(chip, flags);
+
+	return ret;
+}
+EXPORT_SYMBOL(s3c_gpio_slp_setpull);
+
+samsung_gpio_pull_t s3c_gpio_slp_getpull(unsigned int pin)
+{
+	struct samsung_gpio_chip *chip = samsung_gpiolib_getchip(pin);
+	unsigned long flags;
+	int offset;
+	u32 pup = 0;
+
+	if (chip) {
+		if (!chip->config->slp_get_pull) {
+			S3C_GPIO_NOSLP_ERR(pin);
+			goto out;
+		}
+
+		offset = pin - chip->chip.base;
+
+		samsung_gpio_lock(chip, flags);
+		pup = chip->config->slp_get_pull(chip, offset);
+		samsung_gpio_unlock(chip, flags);
+	}
+
+out:
+	return (__force samsung_gpio_pull_t)pup;
+}
+EXPORT_SYMBOL(s3c_gpio_slp_getpull);
+
 
 /* gpiolib wrappers until these are totally eliminated */
 

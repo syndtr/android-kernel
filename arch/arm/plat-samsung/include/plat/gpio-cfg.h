@@ -53,11 +53,19 @@ struct samsung_gpio_cfg {
 	unsigned int	cfg_eint;
 
 	samsung_gpio_pull_t	(*get_pull)(struct samsung_gpio_chip *chip, unsigned offs);
-	int		(*set_pull)(struct samsung_gpio_chip *chip, unsigned offs,
-				    samsung_gpio_pull_t pull);
+	int			(*set_pull)(struct samsung_gpio_chip *chip, unsigned offs,
+					    samsung_gpio_pull_t pull);
 
 	unsigned (*get_config)(struct samsung_gpio_chip *chip, unsigned offs);
 	int	 (*set_config)(struct samsung_gpio_chip *chip, unsigned offs,
+			       unsigned config);
+
+	samsung_gpio_pull_t	(*slp_get_pull)(struct samsung_gpio_chip *chip, unsigned offs);
+	int			(*slp_set_pull)(struct samsung_gpio_chip *chip, unsigned offs,
+						samsung_gpio_pull_t pull);
+
+	unsigned (*slp_get_config)(struct samsung_gpio_chip *chip, unsigned offs);
+	int	 (*slp_set_config)(struct samsung_gpio_chip *chip, unsigned offs,
 			       unsigned config);
 };
 
@@ -195,6 +203,58 @@ static inline int s3c_gpio_cfgrange_nopull(unsigned int pin, unsigned int size,
  * Read the driver streght value for the specified pin.
 */
 extern s5p_gpio_drvstr_t s5p_gpio_get_drvstr(unsigned int pin);
+
+/* Sleep gpio pin configurations */
+#define S3C_GPIO_SLP_OUPUT0	(S3C_GPIO_SPECIAL(0))
+#define S3C_GPIO_SLP_OUPUT1	(S3C_GPIO_SPECIAL(1))
+#define S3C_GPIO_SLP_INPUT	(S3C_GPIO_SPECIAL(2))
+#define S3C_GPIO_SLP_PREV	(S3C_GPIO_SPECIAL(3))
+
+/**
+ * s3c_gpio_slp_cfgpin() - Change the sleep GPIO function of a pin.
+ * @pin pin The pin number to configure.
+ * @to to The configuration for the pin's function.
+ */
+extern int s3c_gpio_slp_cfgpin(unsigned int pin, unsigned int config);
+
+/**
+ * s3c_gpio_slp_getcfg - Read the current function for a sleep GPIO pin
+ * @pin: The pin to read the configuration value for.
+ *
+ * Read the configuration state of the given @pin, returning a value that
+ * could be passed back to s3c_gpio_slp_cfgpin().
+ *
+ * @sa s3c_gpio_slp_cfgpin
+ */
+extern unsigned s3c_gpio_slp_getcfg(unsigned int pin);
+
+/* Define values for the pull-{up,down} available for sleep gpio pin.
+ */
+#define S3C_GPIO_SLP_PULL_NONE	((__force samsung_gpio_pull_t)0x00)
+#define S3C_GPIO_SLP_PULL_DOWN	((__force samsung_gpio_pull_t)0x01)
+#define S3C_GPIO_SLP_PULL_UP	((__force samsung_gpio_pull_t)0x02)
+
+/**
+ * s3c_gpio_slp_setpull() - set the state of a sleep gpio pin pull resistor
+ * @pin: The pin number to configure the pull resistor.
+ * @pull: The configuration for the pull resistor.
+ *
+ * This function sets the state of the pull-{up,down} resistor for the
+ * specified pin. It will return 0 if successful, or a negative error
+ * code if the pin cannot support the requested pull setting.
+ *
+ * @pull is one of S3C_GPIO_SLP_PULL_NONE, S3C_GPIO_SLP_PULL_DOWN or S3C_GPIO_SLP_PULL_UP.
+*/
+extern int s3c_gpio_slp_setpull(unsigned int pin, samsung_gpio_pull_t pull);
+
+/**
+ * s3c_gpio_slp_getpull() - get the pull resistor state of a sleep gpio pin
+ * @pin: The pin number to get the settings for
+ *
+ * Read the pull resistor value for the specified pin.
+*/
+extern samsung_gpio_pull_t s3c_gpio_slp_getpull(unsigned int pin);
+
 
 /**
  * s3c_gpio_set_drvstr() - set the driver streght value of a gpio pin
