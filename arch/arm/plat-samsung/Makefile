@@ -31,6 +31,8 @@ obj-y				+= platformdata.o
 obj-y				+= devs.o
 obj-y				+= dev-uart.o
 
+obj-$(CONFIG_S3C_DEV_I2C_GPIO)	+= dev-i2c-gpio.o
+
 obj-$(CONFIG_SAMSUNG_DEV_BACKLIGHT)	+= dev-backlight.o
 
 # DMA support
