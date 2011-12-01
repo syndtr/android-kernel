@@ -125,8 +125,14 @@
 #define S5P_GPIOINT_BASE	(IRQ_EINT(31) + 1)
 #define S5P_GPIOINT_GROUP_MAXNR	22
 
+#define S5P_NR_IRQS		(IRQ_EINT(31) + S5P_GPIOINT_COUNT + 1)
+
+/* MAX8998 interrupt */
+#define MAX8998_EINT_BASE	S5P_NR_IRQS
+#define MAX8998_NR_IRQS		18
+
 /* Set the default NR_IRQS */
-#define NR_IRQS			(IRQ_EINT(31) + S5P_GPIOINT_COUNT + 1)
+#define NR_IRQS			(MAX8998_EINT_BASE + MAX8998_NR_IRQS + 1)
 
 /* Compatibility */
 #define IRQ_LCD_FIFO		IRQ_LCD0

@@ -113,6 +113,9 @@ static void __init qss_machine_init(void)
 	qss_fiqdbg_init();
 #endif
 
+	/* MFD */
+	qss_mfd_init();
+
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
 
 	/* Input */
