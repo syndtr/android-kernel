@@ -20,6 +20,8 @@
 #include <mach/map.h>
 #include <plat/cpu.h>
 
+void (*s5p_reset_hook)(void);
+
 unsigned long samsung_cpu_id;
 static unsigned int samsung_cpu_rev;
 

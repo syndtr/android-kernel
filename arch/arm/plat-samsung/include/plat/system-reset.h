@@ -14,7 +14,7 @@
 
 #include <plat/watchdog-reset.h>
 
-void (*s5p_reset_hook)(void);
+extern void (*s5p_reset_hook)(void);
 
 static void arch_reset(char mode, const char *cmd)
 {
