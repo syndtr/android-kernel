@@ -266,6 +266,7 @@ static int __devinit max8998_rtc_probe(struct platform_device *pdev)
 	info->irq = max8998->irq_base + MAX8998_IRQ_ALARM0;
 
 	platform_set_drvdata(pdev, info);
+	device_init_wakeup(&pdev->dev, max8998->wakeup);
 
 	info->rtc_dev = rtc_device_register("max8998-rtc", &pdev->dev,
 			&max8998_rtc_ops, THIS_MODULE);
