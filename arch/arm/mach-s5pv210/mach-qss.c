@@ -120,6 +120,9 @@ static void __init qss_machine_init(void)
 
 	/* Input */
 	qss_input_init();
+
+	/* Switch */
+	qss_switch_init();
 }
 
 MACHINE_START(QSS, "QSS")
