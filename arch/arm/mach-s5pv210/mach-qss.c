@@ -114,6 +114,9 @@ static void __init qss_machine_init(void)
 #endif
 
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
+
+	/* Input */
+	qss_input_init();
 }
 
 MACHINE_START(QSS, "QSS")
