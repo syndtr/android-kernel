@@ -46,28 +46,30 @@
 				 S5PV210_UFCON_RXTRIG4)
 
 static struct s3c2410_uartcfg qss_uartcfgs[] __initdata = {
-	[0] = {
+	{
 		.hwport		= 0,
 		.flags		= 0,
 		.ucon		= SMDKC110_UCON_DEFAULT,
 		.ulcon		= SMDKC110_ULCON_DEFAULT,
 		.ufcon		= SMDKC110_UFCON_DEFAULT,
 	},
-	[1] = {
+	{
 		.hwport		= 1,
 		.flags		= 0,
 		.ucon		= SMDKC110_UCON_DEFAULT,
 		.ulcon		= SMDKC110_ULCON_DEFAULT,
 		.ufcon		= SMDKC110_UFCON_DEFAULT,
 	},
-	[2] = {
+#ifndef CONFIG_FIQ_DEBUGGER
+	{
 		.hwport		= 2,
 		.flags		= 0,
 		.ucon		= SMDKC110_UCON_DEFAULT,
 		.ulcon		= SMDKC110_ULCON_DEFAULT,
 		.ufcon		= SMDKC110_UFCON_DEFAULT,
 	},
-	[3] = {
+#endif
+	{
 		.hwport		= 3,
 		.flags		= 0,
 		.ucon		= SMDKC110_UCON_DEFAULT,
@@ -105,6 +107,11 @@ static void __init qss_machine_init(void)
 	qss_gpio_init();
 
 	s3c_pm_init();
+
+	/* FIQ debugger */
+#ifdef CONFIG_FIQ_DEBUGGER
+	qss_fiqdbg_init();
+#endif
 
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
 }

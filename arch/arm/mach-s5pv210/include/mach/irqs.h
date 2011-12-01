@@ -134,4 +134,7 @@
 #define IRQ_LCD_SYSTEM		IRQ_LCD2
 #define IRQ_MIPI_CSIS0		IRQ_MIPI_CSIS
 
+/* FIQ */
+#define FIQ_START		0
+
 #endif /* ASM_ARCH_IRQS_H */

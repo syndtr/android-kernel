@@ -15,5 +15,6 @@
 /* inits */
 
 void qss_gpio_init(void) __init;
+void qss_fiqdbg_init(void) __init;
 
 #endif
