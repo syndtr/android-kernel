@@ -10,15 +10,31 @@
 #ifndef _FSA9480_H_
 #define _FSA9480_H_
 
-#define FSA9480_ATTACHED	1
-#define FSA9480_DETACHED	0
+enum {
+	FSA9480_SWITCH_SELECT,
+	FSA9480_SWITCH_USB,
+	FSA9480_SWITCH_UART,
+	FSA9480_SWITCH_CHARGER,
+	FSA9480_SWITCH_JIG,
+	FSA9480_SWITCH_DESKDOCK,
+	FSA9480_SWITCH_CARDOCK
+};
+
+enum {
+	FSA9480_SWITCH_DETACHED,
+	FSA9480_SWITCH_ATTACHED
+};
+
+enum {
+	FSA9480_SWITCH_SEL_AUTO,
+	FSA9480_SWITCH_SEL_DHOST,
+	FSA9480_SWITCH_SEL_AUDIO,
+	FSA9480_SWITCH_SEL_UART,
+	FSA9480_SWITCH_SEL_VAUDIO
+};
 
 struct fsa9480_platform_data {
 	void (*cfg_gpio) (void);
-	void (*usb_cb) (u8 attached);
-	void (*uart_cb) (u8 attached);
-	void (*charger_cb) (u8 attached);
-	void (*jig_cb) (u8 attached);
 	void (*reset_cb) (void);
 	void (*usb_power) (u8 on);
 	int wakeup;

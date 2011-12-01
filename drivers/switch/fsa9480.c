@@ -21,6 +21,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
+#include <linux/switch.h>
 
 /* FSA9480 I2C registers */
 #define FSA9480_REG_DEVID		0x01
@@ -98,6 +99,7 @@
 
 struct fsa9480_usbsw {
 	struct i2c_client		*client;
+	struct switch_dev		sdev;
 	struct fsa9480_platform_data	*pdata;
 	int				dev1;
 	int				dev2;
@@ -145,61 +147,145 @@ static int fsa9480_read_irq(struct i2c_client *client, int *value)
 	return ret;
 }
 
-static void fsa9480_set_switch(const char *buf)
+static const char *states_bool[] = {
+	"0",
+	"1",
+};
+
+static const char *states_mansw[] = {
+	"auto",
+	"dhost",
+	"audio",
+	"uart",
+	"vaudio",
+};
+
+static int fsa9480_mansw_get_state(struct switch_dev *sdev,
+				 struct switch_attr *attr)
 {
-	struct fsa9480_usbsw *usbsw = chip;
+	struct fsa9480_usbsw *usbsw =
+			container_of(sdev, struct fsa9480_usbsw, sdev);
+	struct i2c_client *client = usbsw->client;
+	unsigned ret, state;
+
+	ret = fsa9480_read_reg(client, FSA9480_REG_MANSW1);
+	if (ret < 0)
+		return ret;
+
+	switch(ret) {
+	case SW_AUTO:
+		state = FSA9480_SWITCH_SEL_AUTO;
+		break;
+	case SW_DHOST:
+		state = FSA9480_SWITCH_SEL_DHOST;
+		break;
+	case SW_AUDIO:
+		state = FSA9480_SWITCH_SEL_AUDIO;
+		break;
+	case SW_UART:
+		state = FSA9480_SWITCH_SEL_UART;
+		break;
+	case SW_VAUDIO:
+		state = FSA9480_SWITCH_SEL_VAUDIO;
+		break;
+	default:
+		state = ret;
+	}
+
+	return state;
+}
+
+static int fsa9480_mansw_set_state(struct switch_dev *sdev,
+				 struct switch_attr *attr, unsigned state)
+{
+	struct fsa9480_usbsw *usbsw =
+			container_of(sdev, struct fsa9480_usbsw, sdev);
 	struct i2c_client *client = usbsw->client;
 	unsigned int value;
 	unsigned int path = 0;
 
 	value = fsa9480_read_reg(client, FSA9480_REG_CTRL);
 
-	if (!strncmp(buf, "VAUDIO", 6)) {
-		path = SW_VAUDIO;
-		value &= ~CON_MANUAL_SW;
-	} else if (!strncmp(buf, "UART", 4)) {
-		path = SW_UART;
-		value &= ~CON_MANUAL_SW;
-	} else if (!strncmp(buf, "AUDIO", 5)) {
-		path = SW_AUDIO;
-		value &= ~CON_MANUAL_SW;
-	} else if (!strncmp(buf, "DHOST", 5)) {
-		path = SW_DHOST;
-		value &= ~CON_MANUAL_SW;
-	} else if (!strncmp(buf, "AUTO", 4)) {
+	switch(state) {
+	case FSA9480_SWITCH_SEL_AUTO:
 		path = SW_AUTO;
 		value |= CON_MANUAL_SW;
-	} else {
-		printk(KERN_ERR "Wrong command\n");
-		return;
+		break;
+	case FSA9480_SWITCH_SEL_DHOST:
+		path = SW_DHOST;
+		value &= ~CON_MANUAL_SW;
+		break;
+	case FSA9480_SWITCH_SEL_AUDIO:
+		path = SW_AUDIO;
+		value &= ~CON_MANUAL_SW;
+		break;
+	case FSA9480_SWITCH_SEL_UART:
+		path = SW_UART;
+		value &= ~CON_MANUAL_SW;
+		break;
+	case FSA9480_SWITCH_SEL_VAUDIO:
+		path = SW_VAUDIO;
+		value &= ~CON_MANUAL_SW;
+		break;
+	default:
+		return -EINVAL;
 	}
 
 	usbsw->mansw = path;
 	fsa9480_write_reg(client, FSA9480_REG_MANSW1, path);
 	fsa9480_write_reg(client, FSA9480_REG_CTRL, value);
+
+	return 0;
 }
 
-static ssize_t fsa9480_get_switch(char *buf)
-{
-	struct fsa9480_usbsw *usbsw = chip;
-	struct i2c_client *client = usbsw->client;
-	unsigned int value;
 
-	value = fsa9480_read_reg(client, FSA9480_REG_MANSW1);
-
-	if (value == SW_VAUDIO)
-		return sprintf(buf, "VAUDIO\n");
-	else if (value == SW_UART)
-		return sprintf(buf, "UART\n");
-	else if (value == SW_AUDIO)
-		return sprintf(buf, "AUDIO\n");
-	else if (value == SW_DHOST)
-		return sprintf(buf, "DHOST\n");
-	else if (value == SW_AUTO)
-		return sprintf(buf, "AUTO\n");
-	else
-		return sprintf(buf, "%x", value);
-}
+static struct switch_attr attrs[] = {
+	[FSA9480_SWITCH_SELECT] = {
+		.name		= "select",
+		.states		= states_mansw,
+		.states_nr	= ARRAY_SIZE(states_mansw),
+		.get_state	= fsa9480_mansw_get_state,
+		.set_state	= fsa9480_mansw_set_state,
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_WRITEABLE |
+				  SWITCH_ATTR_IGNSTATE,
+	},
+	[FSA9480_SWITCH_USB] = {
+		.name		= "usb",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+	[FSA9480_SWITCH_UART] = {
+		.name		= "uart",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+	[FSA9480_SWITCH_CHARGER] = {
+		.name		= "charger",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+	[FSA9480_SWITCH_JIG] = {
+		.name		= "jig",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+	[FSA9480_SWITCH_DESKDOCK] = {
+		.name		= "deskdock",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+	[FSA9480_SWITCH_CARDOCK] = {
+		.name		= "cardock",
+		.states		= states_bool,
+		.states_nr	= ARRAY_SIZE(states_bool),
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
+	},
+};
 
 static ssize_t fsa9480_show_device(struct device *dev,
 				   struct device_attribute *attr,
@@ -234,29 +320,10 @@ static ssize_t fsa9480_show_device(struct device *dev,
 	return sprintf(buf, "UNKNOWN\n");
 }
 
-static ssize_t fsa9480_show_manualsw(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return fsa9480_get_switch(buf);
-
-}
-
-static ssize_t fsa9480_set_manualsw(struct device *dev,
-				    struct device_attribute *attr,
-				    const char *buf, size_t count)
-{
-	fsa9480_set_switch(buf);
-
-	return count;
-}
-
 static DEVICE_ATTR(device, S_IRUGO, fsa9480_show_device, NULL);
-static DEVICE_ATTR(switch, S_IRUGO | S_IWUSR,
-		fsa9480_show_manualsw, fsa9480_set_manualsw);
 
 static struct attribute *fsa9480_attributes[] = {
 	&dev_attr_device.attr,
-	&dev_attr_switch.attr,
 	NULL
 };
 
@@ -266,8 +333,7 @@ static const struct attribute_group fsa9480_group = {
 
 static void fsa9480_detect_dev(struct fsa9480_usbsw *usbsw, int intr)
 {
-	int val1, val2, ctrl;
-	struct fsa9480_platform_data *pdata = usbsw->pdata;
+	int val1, val2, ctrl, ret;
 	struct i2c_client *client = usbsw->client;
 
 	val1 = fsa9480_read_reg(client, FSA9480_REG_DEV_T1);
@@ -283,8 +349,8 @@ static void fsa9480_detect_dev(struct fsa9480_usbsw *usbsw, int intr)
 	if (intr & INT_ATTACH) {	/* Attached */
 		/* USB */
 		if (val1 & DEV_T1_USB_MASK || val2 & DEV_T2_USB_MASK) {
-			if (pdata->usb_cb)
-				pdata->usb_cb(FSA9480_ATTACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_USB,
+					FSA9480_SWITCH_ATTACHED);
 
 			if (usbsw->mansw) {
 				fsa9480_write_reg(client,
@@ -294,8 +360,8 @@ static void fsa9480_detect_dev(struct fsa9480_usbsw *usbsw, int intr)
 
 		/* UART */
 		if (val1 & DEV_T1_UART_MASK || val2 & DEV_T2_UART_MASK) {
-			if (pdata->uart_cb)
-				pdata->uart_cb(FSA9480_ATTACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_UART,
+					FSA9480_SWITCH_ATTACHED);
 
 			if (!(ctrl & CON_MANUAL_SW)) {
 				fsa9480_write_reg(client,
@@ -305,40 +371,73 @@ static void fsa9480_detect_dev(struct fsa9480_usbsw *usbsw, int intr)
 
 		/* CHARGER */
 		if (val1 & DEV_T1_CHARGER_MASK) {
-			if (pdata->charger_cb)
-				pdata->charger_cb(FSA9480_ATTACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_CHARGER,
+					FSA9480_SWITCH_ATTACHED);
 		}
 
 		/* JIG */
 		if (val2 & DEV_T2_JIG_MASK) {
-			if (pdata->jig_cb)
-				pdata->jig_cb(FSA9480_ATTACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_JIG,
+					FSA9480_SWITCH_ATTACHED);
+		}
+
+		/* Desk Dock */
+		if (val2 & DEV_AV) {
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_DESKDOCK,
+					FSA9480_SWITCH_ATTACHED);
+
+			fsa9480_write_reg(client, FSA9480_REG_MANSW1, SW_DHOST);
+			ret = fsa9480_read_reg(client, FSA9480_REG_CTRL);
+			fsa9480_write_reg(client, FSA9480_REG_CTRL,
+					ret & ~CON_MANUAL_SW);
+		}
+
+		/* Car Dock */
+		if (val2 & DEV_JIG_UART_ON) {
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_CARDOCK,
+					FSA9480_SWITCH_ATTACHED);
 		}
 	} else if (intr & INT_DETACH) {	/* Detached */
 		/* USB */
 		if (usbsw->dev1 & DEV_T1_USB_MASK ||
 			usbsw->dev2 & DEV_T2_USB_MASK) {
-			if (pdata->usb_cb)
-				pdata->usb_cb(FSA9480_DETACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_USB,
+					FSA9480_SWITCH_DETACHED);
 		}
 
 		/* UART */
 		if (usbsw->dev1 & DEV_T1_UART_MASK ||
 			usbsw->dev2 & DEV_T2_UART_MASK) {
-			if (pdata->uart_cb)
-				pdata->uart_cb(FSA9480_DETACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_UART,
+					FSA9480_SWITCH_DETACHED);
 		}
 
 		/* CHARGER */
 		if (usbsw->dev1 & DEV_T1_CHARGER_MASK) {
-			if (pdata->charger_cb)
-				pdata->charger_cb(FSA9480_DETACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_CHARGER,
+					FSA9480_SWITCH_DETACHED);
 		}
 
 		/* JIG */
 		if (usbsw->dev2 & DEV_T2_JIG_MASK) {
-			if (pdata->jig_cb)
-				pdata->jig_cb(FSA9480_DETACHED);
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_JIG,
+					FSA9480_SWITCH_DETACHED);
+		}
+
+		/* Desk Dock */
+		if (usbsw->dev2 & DEV_AV) {
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_DESKDOCK,
+					FSA9480_SWITCH_DETACHED);
+
+			ret = fsa9480_read_reg(client, FSA9480_REG_CTRL);
+			fsa9480_write_reg(client, FSA9480_REG_CTRL,
+					ret | CON_MANUAL_SW);
+		}
+
+		/* Car Dock */
+		if (usbsw->dev2 & DEV_JIG_UART_ON) {
+			switch_set_state(&usbsw->sdev, FSA9480_SWITCH_CARDOCK,
+					FSA9480_SWITCH_DETACHED);
 		}
 	}
 
@@ -430,15 +529,25 @@ static int __devinit fsa9480_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, usbsw);
 
+	usbsw->sdev.name = "fsa9480";
+	usbsw->sdev.attrs = attrs;
+	usbsw->sdev.attrs_nr = ARRAY_SIZE(attrs);
+	
+	ret = switch_dev_register(&usbsw->sdev);
+	if (ret) {
+		dev_err(&client->dev, "failed to create switch_dev\n");
+		goto err_switch_dev;
+	}
+
 	ret = fsa9480_irq_init(usbsw);
 	if (ret)
-		goto fail1;
+		goto err_irq_init;
 
 	ret = sysfs_create_group(&client->dev.kobj, &fsa9480_group);
 	if (ret) {
 		dev_err(&client->dev,
 				"failed to create fsa9480 attribute group\n");
-		goto fail2;
+		goto err_sysfs_create;
 	}
 
 	/* ADC Detect Time: 500ms */
@@ -454,10 +563,12 @@ static int __devinit fsa9480_probe(struct i2c_client *client,
 
 	return 0;
 
-fail2:
+err_sysfs_create:
 	if (client->irq)
 		free_irq(client->irq, usbsw);
-fail1:
+err_irq_init:
+	switch_dev_unregister(&usbsw->sdev);
+err_switch_dev:
 	i2c_set_clientdata(client, NULL);
 	kfree(usbsw);
 	return ret;
