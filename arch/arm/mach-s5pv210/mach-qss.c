@@ -123,6 +123,9 @@ static void __init qss_machine_init(void)
 
 	/* Switch */
 	qss_switch_init();
+
+	/* SDHCI */
+	qss_sdhci_init();
 }
 
 MACHINE_START(QSS, "QSS")
