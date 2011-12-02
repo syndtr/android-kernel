@@ -97,6 +97,7 @@ static struct switch_handler_list *handler_get_list(struct switch_handler_head *
 		goto out;
 
 	l->attr_id = attr_id;
+	l->attr = NULL;
 	mutex_init(&l->mutex);
 	INIT_LIST_HEAD(&l->handlers);
 	list_add_tail(&l->list, &h->handlers);
@@ -299,7 +300,7 @@ int switch_handler_register(struct switch_handler *handler)
 {
 	struct switch_handler_head *h;
 	struct switch_handler_list *l;
-	
+
 	if (!handler->dev)
 		return -EINVAL;
 
