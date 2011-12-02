@@ -126,6 +126,9 @@ static void __init qss_machine_init(void)
 
 	/* SDHCI */
 	qss_sdhci_init();
+	
+	/* OneNAND */
+	qss_onenand_init();
 }
 
 MACHINE_START(QSS, "QSS")

@@ -20,5 +20,6 @@ void qss_input_init(void) __init;
 void qss_mfd_init(void) __init;
 void qss_switch_init(void) __init;
 void qss_sdhci_init(void) __init;
+void qss_onenand_init(void) __init;
 
 #endif
