@@ -1065,6 +1065,12 @@ struct platform_device s5p_device_onenand = {
 	.num_resources	= ARRAY_SIZE(s5p_onenand_resources),
 	.resource	= s5p_onenand_resources,
 };
+
+void s5p_onenand_set_platdata(struct onenand_platform_data *pdata)
+{
+	s3c_set_platdata(pdata, sizeof(struct onenand_platform_data),
+			 &s5p_device_onenand);
+}
 #endif /* CONFIG_S5P_DEV_ONENAND */
 
 /* PMU */

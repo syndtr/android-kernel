@@ -34,4 +34,6 @@ static inline void s3c64xx_onenand1_setname(char *name)
 #endif
 }
 
+extern void s5p_onenand_set_platdata(struct onenand_platform_data *pdata);
+
 #endif /* __ASM_ARCH_ONENAND_CORE_H */
