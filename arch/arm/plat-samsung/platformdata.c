@@ -46,6 +46,7 @@ void s3c_sdhci_set_platdata(struct s3c_sdhci_platdata *pd,
 	set->ext_cd_cleanup = pd->ext_cd_cleanup;
 	set->ext_cd_gpio = pd->ext_cd_gpio;
 	set->ext_cd_gpio_invert = pd->ext_cd_gpio_invert;
+	set->card_is_builtin = pd->card_is_builtin;
 
 	if (pd->max_width)
 		set->max_width = pd->max_width;

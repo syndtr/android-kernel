@@ -76,6 +76,8 @@ struct s3c_sdhci_platdata {
 						      int state));
 
 	void	(*cfg_gpio)(struct platform_device *dev, int width);
+
+	bool	card_is_builtin;
 };
 
 /* s3c_sdhci_set_platdata() - common helper for setting SDHCI platform data
