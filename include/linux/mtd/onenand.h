@@ -17,6 +17,7 @@
 #include <linux/mtd/flashchip.h>
 #include <linux/mtd/onenand_regs.h>
 #include <linux/mtd/bbm.h>
+#include <linux/clk.h>
 
 #define MAX_DIES		2
 #define MAX_BUFFERRAM		2
@@ -103,6 +104,7 @@ struct onenand_chip {
 
 	unsigned int		bufferram_index;
 	struct onenand_bufferram	bufferram[MAX_BUFFERRAM];
+	struct clk		*clk;
 
 	int (*command)(struct mtd_info *mtd, int cmd, loff_t address, size_t len);
 	int (*wait)(struct mtd_info *mtd, int state);
@@ -187,6 +189,9 @@ struct onenand_chip {
 #define ONENAND_IS_NOP_1(this)						\
 	(this->options & ONENAND_HAS_NOP_1)
 
+#define FLEXONENAND_BROKEN(this)					\
+	(this->options & ONENAND_IS_BROKEN_FLEXONENAND)
+
 /* Check byte access in OneNAND */
 #define ONENAND_CHECK_BYTE_ACCESS(addr)		(addr & 0x1)
 
@@ -203,6 +208,7 @@ struct onenand_chip {
 #define ONENAND_PAGEBUF_ALLOC		(0x1000)
 #define ONENAND_OOBBUF_ALLOC		(0x2000)
 #define ONENAND_SKIP_INITIAL_UNLOCKING	(0x4000)
+#define ONENAND_IS_BROKEN_FLEXONENAND	(0x8000)
 
 #define ONENAND_IS_4KB_PAGE(this)					\
 	(this->options & ONENAND_HAS_4KB_PAGE)
@@ -237,6 +243,7 @@ struct onenand_platform_data {
 			unsigned char *buffer, int offset, size_t count);
 	struct mtd_partition *parts;
 	unsigned int	nr_parts;
+	unsigned int	options;
 };
 
 #endif	/* __LINUX_MTD_ONENAND_H */

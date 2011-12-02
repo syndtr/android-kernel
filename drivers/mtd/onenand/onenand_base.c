@@ -406,7 +406,7 @@ static int onenand_command(struct mtd_info *mtd, int cmd, loff_t addr, size_t le
 
 	default:
 		block = onenand_block(this, addr);
-		if (FLEXONENAND(this))
+		if (FLEXONENAND_BROKEN(this) || FLEXONENAND(this))
 			page = (int) (addr - onenand_addr(this, block))>>\
 				this->page_shift;
 		else
@@ -4061,7 +4061,7 @@ int onenand_scan(struct mtd_info *mtd, int maxchips)
 	 */
 	switch (mtd->oobsize) {
 	case 128:
-		if (FLEXONENAND(this)) {
+		if (FLEXONENAND_BROKEN(this) || FLEXONENAND(this)) {
 			this->ecclayout = &flexonenand_oob_128;
 			mtd->subpage_sft = 0;
 		} else {

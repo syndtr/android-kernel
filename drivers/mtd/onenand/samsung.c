@@ -23,6 +23,7 @@
 #include <linux/mtd/partitions.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/clk.h>
 
 #include <asm/mach/flash.h>
 #include <plat/regs-onenand.h>
@@ -59,7 +60,7 @@ enum soc_type {
 #define MAP_11				(0x3)
 
 #define S3C64XX_CMD_MAP_SHIFT		24
-#define S5PC100_CMD_MAP_SHIFT		26
+#define S5PC1XX_CMD_MAP_SHIFT		26
 
 #define S3C6400_FBA_SHIFT		10
 #define S3C6400_FPA_SHIFT		4
@@ -197,7 +198,7 @@ static unsigned int s3c64xx_cmd_map(unsigned type, unsigned val)
 
 static unsigned int s5pc1xx_cmd_map(unsigned type, unsigned val)
 {
-	return (type << S5PC100_CMD_MAP_SHIFT) | val;
+	return (type << S5PC1XX_CMD_MAP_SHIFT) | val;
 }
 
 static unsigned int s3c6400_mem_addr(int fba, int fpa, int fsa)
@@ -823,11 +824,32 @@ static void s3c_unlock_all(struct mtd_info *mtd)
 	s3c_onenand_check_lock_status(mtd);
 }
 
+static int s3c_onenand_enable(struct mtd_info *mtd)
+{
+	struct onenand_chip *this = mtd->priv;
+	clk_enable(this->clk);
+
+	return 0;
+}
+
+static int s3c_onenand_disable(struct mtd_info *mtd)
+{
+	struct onenand_chip *this = mtd->priv;
+	clk_disable(this->clk);
+
+	return 0;
+}
+
 static void s3c_onenand_setup(struct mtd_info *mtd)
 {
 	struct onenand_chip *this = mtd->priv;
 
 	onenand->mtd = mtd;
+
+	if (this->clk) {
+		this->enable = s3c_onenand_enable;
+		this->disable = s3c_onenand_disable;
+	}
 
 	if (onenand->type == TYPE_S3C6400) {
 		onenand->mem_addr = s3c6400_mem_addr;
@@ -840,6 +862,7 @@ static void s3c_onenand_setup(struct mtd_info *mtd)
 		onenand->cmd_map = s5pc1xx_cmd_map;
 	} else if (onenand->type == TYPE_S5PC110) {
 		/* Use generic onenand functions */
+		onenand->cmd_map = s5pc1xx_cmd_map;
 		this->read_bufferram = s5pc110_read_bufferram;
 		this->chip_probe = s5pc110_chip_probe;
 		return;
@@ -884,11 +907,22 @@ static int s3c_onenand_probe(struct platform_device *pdev)
 	}
 
 	this = (struct onenand_chip *) &mtd[1];
+	this->options = pdata->options;
 	mtd->priv = this;
 	mtd->dev.parent = &pdev->dev;
 	mtd->owner = THIS_MODULE;
 	onenand->pdev = pdev;
 	onenand->type = platform_get_device_id(pdev)->driver_data;
+
+	this->clk = clk_get(&pdev->dev, "onenand");
+
+	if (IS_ERR(this->clk)) {
+		dev_warn(&pdev->dev, "cannot get clock\n");
+		this->clk = NULL;
+	}
+
+	if (this->clk)
+		clk_enable(this->clk);
 
 	s3c_onenand_setup(mtd);
 
@@ -913,6 +947,7 @@ static int s3c_onenand_probe(struct platform_device *pdev)
 		err = -EFAULT;
 		goto ioremap_failed;
 	}
+
 	/* Set onenand_chip also */
 	this->base = onenand->base;
 
@@ -1020,6 +1055,8 @@ static int s3c_onenand_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, mtd);
 
+	if (this->clk)
+		clk_disable(this->clk);
 	return 0;
 
 scan_failed:
@@ -1047,6 +1084,10 @@ ioremap_failed:
 		release_mem_region(onenand->base_res->start,
 				   resource_size(onenand->base_res));
 resource_failed:
+	if (this->clk) {
+		clk_disable(this->clk);
+		clk_put(this->clk);
+	}
 	kfree(onenand);
 onenand_fail:
 	kfree(mtd);
@@ -1056,6 +1097,7 @@ onenand_fail:
 static int __devexit s3c_onenand_remove(struct platform_device *pdev)
 {
 	struct mtd_info *mtd = platform_get_drvdata(pdev);
+	struct onenand_chip *this = mtd->priv;
 
 	onenand_release(mtd);
 	if (onenand->ahb_addr)
@@ -1076,6 +1118,8 @@ static int __devexit s3c_onenand_remove(struct platform_device *pdev)
 	platform_set_drvdata(pdev, NULL);
 	kfree(onenand->oob_buf);
 	kfree(onenand->page_buf);
+	if (this->clk)
+		clk_put(this->clk);
 	kfree(onenand);
 	kfree(mtd);
 	return 0;
@@ -1097,7 +1141,11 @@ static  int s3c_pm_ops_resume(struct device *dev)
 	struct mtd_info *mtd = platform_get_drvdata(pdev);
 	struct onenand_chip *this = mtd->priv;
 
+	if (this->clk)
+		clk_enable(this->clk);
 	this->unlock_all(mtd);
+	if (this->clk)
+		clk_disable(this->clk);
 	return 0;
 }
 
