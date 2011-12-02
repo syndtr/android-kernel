@@ -81,6 +81,7 @@ static struct s3c2410_uartcfg qss_uartcfgs[] __initdata = {
 static struct platform_device *qss_devices[] __initdata = {
 	&s3c_device_rtc,
 	&s3c_device_wdt,
+	&s3c_device_usb_hsotg,
 };
 
 static void __init qss_fixup(struct tag *tag, char **cmdline,

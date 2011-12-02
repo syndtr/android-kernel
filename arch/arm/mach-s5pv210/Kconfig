@@ -130,6 +130,7 @@ config MACH_QSS
 	select S3C_DEV_HSMMC2
 	select S3C_DEV_I2C_GPIO
 	select S3C_DEV_RTC
+	select S3C_DEV_USB_HSOTG
 	select S3C_DEV_WDT
 	select S5P_DEV_ONENAND
 	select S5PV210_SETUP_SDHCI
