@@ -125,6 +125,7 @@ config MACH_QSS
 	bool "QSS"
 	select CPU_S5PV210
 	select S5P_GPIO_INT
+	select S3C_DEV_FB
 	select S3C_DEV_HSMMC
 	select S3C_DEV_HSMMC1
 	select S3C_DEV_HSMMC2
@@ -133,6 +134,7 @@ config MACH_QSS
 	select S3C_DEV_USB_HSOTG
 	select S3C_DEV_WDT
 	select S5P_DEV_ONENAND
+	select S5PV210_SETUP_FB_24BPP
 	select S5PV210_SETUP_SDHCI
 	help
 	  Machine support for Samsung SMDKC110

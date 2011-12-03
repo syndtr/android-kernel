@@ -130,6 +130,9 @@ static void __init qss_machine_init(void)
 	
 	/* OneNAND */
 	qss_onenand_init();
+
+	/* Display */
+	qss_display_init();
 }
 
 MACHINE_START(QSS, "QSS")
