@@ -12,13 +12,17 @@
 #include <linux/gpio_keys.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
+#include <linux/i2c.h>
+#include <linux/i2c-gpio.h>
 #include <linux/input.h>
+#include <linux/input/cypress-touchkey.h>
 
 #include <mach/irqs.h>
 #include <mach/gpio.h>
 #include <mach/regs-gpio.h>
 
 #include <plat/devs.h>
+#include <plat/iic.h>
 #include <plat/gpio-cfg.h>
 
 #include <mach/qss.h>
@@ -78,15 +82,71 @@ static void __init qss_keypad_cfg_gpio(void)
 	s3c_gpio_cfgrange_nopull(GPIO_KEY_VOLUMEDOWN, 1, EINT_MODE);
 }
 
+/* Touchkey */
+
+static void touchkey_onoff(int onoff)
+{
+	gpio_direction_output(GPIO_TOUCHKEY_EN, onoff);
+
+	if (onoff == TOUCHKEY_OFF)
+		msleep(30);
+	else
+		msleep(50);
+}
+
+static const int touchkey_code[] = {
+	KEY_MENU,
+	KEY_HOME,
+	KEY_BACK,
+	KEY_SEARCH
+};
+
+static struct touchkey_platform_data touchkey_pdata = {
+	.keycode_cnt	= ARRAY_SIZE(touchkey_code),
+	.keycode	= touchkey_code,
+	.touchkey_onoff	= touchkey_onoff,
+};
+
+static struct i2c_board_info i2c10_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("cypress-touchkey", 0x20),
+		.platform_data 	= &touchkey_pdata,
+	},
+};
+
+static void __init qss_touchkey_cfg_gpio(void)
+{
+	int ret;
+
+	/* i2c gpio cfg */
+	s3c_i2c10_cfg_gpio(&s3c_device_i2c10);
+
+	s3c_gpio_cfgrange_nopull(GPIO_TOUCHKEY_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_request(GPIO_TOUCHKEY_EN, "TOUCHKEY_EN");
+
+	/* gpio interrupt */
+	s3c_gpio_cfgrange_nopull(GPIO_TOUCHKEY_INT, 1, EINT_MODE);
+	ret = s5p_register_gpio_interrupt(GPIO_TOUCHKEY_INT);
+	if (ret < 0)
+		printk(KERN_ERR "qss-input: unable to register touckey interrupt\n");
+	else
+		i2c10_devs[0].irq = ret;
+}
+
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_keypad,
+	&s3c_device_i2c10,
 };
 
 void __init qss_input_init(void)
 {
 	/* gpio cfg */
 	qss_keypad_cfg_gpio();
+	qss_touchkey_cfg_gpio();
 
 	/* register devices */
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
+
+	/* touchkey */
+	i2c_register_board_info(10, i2c10_devs, ARRAY_SIZE(i2c10_devs));
 }
