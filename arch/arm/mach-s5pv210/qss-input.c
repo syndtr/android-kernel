@@ -14,6 +14,7 @@
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/i2c-gpio.h>
+#include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/input.h>
 #include <linux/input/cypress-touchkey.h>
 
@@ -82,6 +83,55 @@ static void __init qss_keypad_cfg_gpio(void)
 	s3c_gpio_cfgrange_nopull(GPIO_KEY_VOLUMEDOWN, 1, EINT_MODE);
 }
 
+/* Touch Screen */
+
+static struct mxt_platform_data qt602240_pdata = {
+	.x_line		= 19,
+	.y_line		= 11,
+	.x_size		= 800,
+	.y_size		= 480,
+	.blen		= 0x21,
+	.threshold	= 0x28,
+	.voltage	= 2800000,              /* 2.8V */
+	.orient		= MXT_DIAGONAL,
+	.irqflags	= IRQF_TRIGGER_FALLING,
+};
+
+static struct s3c2410_platform_i2c i2c2_pdata = {
+	.flags		= 0,
+	.bus_num	= 2,
+	.slave_addr	= 0x10,
+	.frequency	= 400 * 1000,
+	.sda_delay	= 100,
+};
+
+static struct i2c_board_info i2c2_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("qt602240_ts", 0x4a),
+		.platform_data		= &qt602240_pdata,
+	},
+};
+
+static void __init qss_tsp_cfg_gpio(void)
+{
+	int ret;
+
+	/* i2c gpio cfg */
+	s3c_i2c2_cfg_gpio(&s3c_device_i2c2);
+
+	s3c_gpio_cfgrange_nopull(GPIO_TSP_LDO_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_TSP_LDO_EN, 1);
+
+	/* gpio interrupt */
+	s3c_gpio_cfgall_range(GPIO_TSP_INT, 1, EINT_MODE, S3C_GPIO_PULL_UP);
+	ret = s5p_register_gpio_interrupt(GPIO_TSP_INT);
+	if (ret < 0)
+		printk(KERN_ERR "qss-input: unable to register tsp interrupt\n");
+	else
+		i2c2_devs[0].irq = ret;
+
+}
+
 /* Touchkey */
 
 static void touchkey_onoff(int onoff)
@@ -135,6 +185,7 @@ static void __init qss_touchkey_cfg_gpio(void)
 
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_keypad,
+	&s3c_device_i2c2,
 	&s3c_device_i2c10,
 };
 
@@ -142,10 +193,17 @@ void __init qss_input_init(void)
 {
 	/* gpio cfg */
 	qss_keypad_cfg_gpio();
+	qss_tsp_cfg_gpio();
 	qss_touchkey_cfg_gpio();
+
+	/* i2c platdata */
+	s3c_i2c2_set_platdata(&i2c2_pdata);
 
 	/* register devices */
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
+
+	/* tsp */
+	i2c_register_board_info(2, i2c2_devs, ARRAY_SIZE(i2c2_devs));
 
 	/* touchkey */
 	i2c_register_board_info(10, i2c10_devs, ARRAY_SIZE(i2c10_devs));
