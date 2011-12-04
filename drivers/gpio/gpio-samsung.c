@@ -517,6 +517,17 @@ static struct samsung_gpio_cfg s5pv210_gpio_cfg = {
 	.slp_get_config	= samsung_gpio_slp_getcfg,
 };
 
+static struct samsung_gpio_cfg s5pv210_gpio_cfg_noint = {
+	.set_pull	= samsung_gpio_setpull_updown,
+	.get_pull	= samsung_gpio_getpull_updown,
+	.set_config	= samsung_gpio_setcfg_4bit,
+	.get_config	= samsung_gpio_getcfg_4bit,
+	.slp_set_pull	= samsung_gpio_slp_setpull_updown,
+	.slp_get_pull	= samsung_gpio_slp_getpull_updown,
+	.slp_set_config	= samsung_gpio_slp_setcfg,
+	.slp_get_config	= samsung_gpio_slp_getcfg,
+};
+
 static struct samsung_gpio_cfg exynos4_gpio_cfg = {
 	.set_pull	= exynos4_gpio_setpull,
 	.get_pull	= exynos4_gpio_getpull,
@@ -2063,6 +2074,7 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 			.label	= "GPG3",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_GPI(0),
 			.ngpio	= S5PV210_GPIO_I_NR,
@@ -2099,30 +2111,35 @@ static struct samsung_gpio_chip s5pv210_gpios_4bit[] = {
 			.label	= "GPJ4",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_MP01(0),
 			.ngpio	= S5PV210_GPIO_MP01_NR,
 			.label	= "MP01",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_MP02(0),
 			.ngpio	= S5PV210_GPIO_MP02_NR,
 			.label	= "MP02",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_MP03(0),
 			.ngpio	= S5PV210_GPIO_MP03_NR,
 			.label	= "MP03",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_MP04(0),
 			.ngpio	= S5PV210_GPIO_MP04_NR,
 			.label	= "MP04",
 		},
 	}, {
+		.config	= &s5pv210_gpio_cfg_noint,
 		.chip	= {
 			.base	= S5PV210_MP05(0),
 			.ngpio	= S5PV210_GPIO_MP05_NR,
