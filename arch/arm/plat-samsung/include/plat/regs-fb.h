@@ -332,6 +332,7 @@
 #define VIDINTCON0_INT_ENABLE			(1 << 0)
 
 #define VIDINTCON1				(0x134)
+#define VIDINTCON1_INT_VP			(1 << 5)
 #define VIDINTCON1_INT_I180			(1 << 2)
 #define VIDINTCON1_INT_FRAME			(1 << 1)
 #define VIDINTCON1_INT_FIFO			(1 << 0)

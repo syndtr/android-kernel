@@ -178,6 +178,7 @@ struct s3c_fb_win {
  * @count:	vsync interrupt count
  */
 struct s3c_fb_vsync {
+	unsigned int		enabled;
 	wait_queue_head_t	wait;
 	unsigned int		count;
 };
@@ -961,19 +962,15 @@ static irqreturn_t s3c_fb_irq(int irq, void *dev_id)
 
 	irq_sts_reg = readl(regs + VIDINTCON1);
 
-	if (irq_sts_reg & VIDINTCON1_INT_FRAME) {
-
-		/* VSYNC interrupt, accept it */
-		writel(VIDINTCON1_INT_FRAME, regs + VIDINTCON1);
-
+	if (sfb->vsync_info.enabled && irq_sts_reg & VIDINTCON1_INT_FRAME) {
 		sfb->vsync_info.count++;
 		wake_up_interruptible(&sfb->vsync_info.wait);
 	}
 
-	/* We only support waiting for VSYNC for now, so it's safe
-	 * to always disable irqs here.
-	 */
-	s3c_fb_disable_irq(sfb);
+	irq_sts_reg |= (VIDINTCON1_INT_VP | VIDINTCON1_INT_I180 |
+		VIDINTCON1_INT_FRAME | VIDINTCON1_INT_FIFO);
+
+	writel(irq_sts_reg, regs + VIDINTCON1);
 
 	spin_unlock(&sfb->slock);
 	return IRQ_HANDLED;
@@ -992,11 +989,13 @@ static int s3c_fb_wait_for_vsync(struct s3c_fb *sfb, u32 crtc)
 	if (crtc != 0)
 		return -ENODEV;
 
+	sfb->vsync_info.enabled = 1;
 	count = sfb->vsync_info.count;
-	s3c_fb_enable_irq(sfb);
 	ret = wait_event_interruptible_timeout(sfb->vsync_info.wait,
 				       count != sfb->vsync_info.count,
 				       msecs_to_jiffies(VSYNC_TIMEOUT_MSEC));
+
+	sfb->vsync_info.enabled = 0;
 	if (ret == 0)
 		return -ETIMEDOUT;
 
@@ -1406,7 +1405,7 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 	}
 	sfb->irq_no = res->start;
 	ret = request_irq(sfb->irq_no, s3c_fb_irq,
-			  0, "s3c_fb", sfb);
+			  IRQF_SHARED, "s3c_fb", sfb);
 	if (ret) {
 		dev_err(dev, "irq request failed\n");
 		goto err_ioremap;
@@ -1459,6 +1458,8 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, sfb);
 	pm_runtime_put_sync(sfb->dev);
 
+	s3c_fb_enable_irq(sfb);
+
 	return 0;
 
 err_irq:
@@ -1503,6 +1504,8 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 		if (sfb->windows[win])
 			s3c_fb_release_win(sfb, sfb->windows[win]);
 
+	s3c_fb_disable_irq(sfb);
+
 	free_irq(sfb->irq_no, sfb);
 
 	iounmap(sfb->regs);
@@ -1531,6 +1534,8 @@ static int s3c_fb_suspend(struct device *dev)
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
 	struct s3c_fb_win *win;
 	int win_no;
+
+	s3c_fb_disable_irq(sfb);
 
 	for (win_no = S3C_FB_MAX_WIN - 1; win_no >= 0; win_no--) {
 		win = sfb->windows[win_no];
@@ -1586,6 +1591,8 @@ static int s3c_fb_resume(struct device *dev)
 		dev_dbg(&pdev->dev, "resuming window %d\n", win_no);
 		s3c_fb_set_par(win->fbinfo);
 	}
+
+	s3c_fb_enable_irq(sfb);
 
 	return 0;
 }
