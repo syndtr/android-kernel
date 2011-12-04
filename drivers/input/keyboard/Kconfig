@@ -347,6 +347,15 @@ config KEYBOARD_MPR121
 	  To compile this driver as a module, choose M here: the
 	  module will be called mpr121_touchkey.
 
+config KEYBOARD_CYPRESS
+	tristate "Cypress Touchkey"
+	default n
+	help
+	  Say Y here if you want to use the Cypress touchkey.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called cypress-touchkey.
+
 config KEYBOARD_IMX
 	tristate "IMX keypad support"
 	depends on ARCH_MXC
