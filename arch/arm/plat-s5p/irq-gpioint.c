@@ -18,10 +18,14 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/slab.h>
+#include <linux/suspend.h>
+#include <linux/syscore_ops.h>
 
 #include <mach/map.h>
+#include <mach/regs-gpio.h>
 #include <plat/gpio-core.h>
 #include <plat/gpio-cfg.h>
+#include <plat/pm.h>
 
 #include <asm/mach/irq.h>
 
@@ -32,6 +36,10 @@
 #define PEND_OFFSET		0xA00
 #define REG_OFFSET(x)		((x) << 2)
 
+struct s5p_gpioint_pmsave {
+	u32	con, msk;
+};
+
 struct s5p_gpioint_bank {
 	struct list_head	list;
 	int			start;
@@ -39,6 +47,9 @@ struct s5p_gpioint_bank {
 	int			irq;
 	struct samsung_gpio_chip	**chips;
 	void			(*handler)(unsigned int, struct irq_desc *);
+#ifdef CONFIG_PM
+	struct s5p_gpioint_pmsave	*pmsave;
+#endif
 };
 
 LIST_HEAD(banks);
@@ -202,15 +213,99 @@ int __init s5p_register_gpio_interrupt(int pin)
 int __init s5p_register_gpioint_bank(int chain_irq, int start, int nr_groups)
 {
 	struct s5p_gpioint_bank *bank;
+	struct s5p_gpioint_pmsave *pmsave = NULL;
 
 	bank = kzalloc(sizeof(*bank), GFP_KERNEL);
 	if (!bank)
 		return -ENOMEM;
 
+#ifdef CONFIG_PM
+	pmsave = kzalloc(sizeof(*pmsave) * nr_groups, GFP_KERNEL);
+	if (!pmsave) {
+		kfree(bank);
+		return -ENOMEM;
+	}
+#endif
+
 	bank->start = start;
 	bank->nr_groups = nr_groups;
 	bank->irq = chain_irq;
+	bank->pmsave = pmsave;
 
 	list_add_tail(&bank->list, &banks);
 	return 0;
 }
+
+#ifdef CONFIG_PM
+static void s5p_gpioint_do_save(struct s5p_gpioint_bank *bank, bool restore)
+{
+	int group;
+	void __iomem *base;
+	struct s5p_gpioint_pmsave *pmsave;
+
+	if (!bank->pmsave)
+		return;
+
+	for (group = 0; group < bank->nr_groups; group++) {
+		struct samsung_gpio_chip *chip = bank->chips[group];
+		if (!chip)
+			continue;
+
+		pmsave = &bank->pmsave[group];
+		base = (void __iomem *)(GPIO_BASE(chip) + REG_OFFSET(group));
+
+		if (restore) {
+			u32 old_con = __raw_readl(base + CON_OFFSET);
+			u32 old_msk = __raw_readl(base + MASK_OFFSET);
+			
+			__raw_writel(pmsave->con, base + CON_OFFSET);
+			__raw_writel(pmsave->msk, base + MASK_OFFSET);
+			
+			S3C_PMDBG("[GPIOINT] %s: CON %08x => %08x, MASK %08x => %08x\n",
+				  chip->chip.label,
+				  old_con, __raw_readl(base + CON_OFFSET),
+				  old_msk, __raw_readl(base + MASK_OFFSET));
+		} else {
+			pmsave->con = __raw_readl(base + CON_OFFSET);
+			pmsave->msk = __raw_readl(base + MASK_OFFSET);
+			
+			S3C_PMDBG("[GPIOINT] %s: save CON %08x, MASK %08x\n",
+				  chip->chip.label,
+				  pmsave->con,
+				  pmsave->msk);
+		}
+	}
+}
+
+static int s5p_gpioint_save(void)
+{
+	struct s5p_gpioint_bank *b;
+
+	list_for_each_entry(b, &banks, list) {
+		s5p_gpioint_do_save(b, false);
+	}
+
+	return 0;
+}
+
+static void s5p_gpioint_restore(void)
+{
+	struct s5p_gpioint_bank *b;
+
+	list_for_each_entry(b, &banks, list) {
+		s5p_gpioint_do_save(b, true);
+	}
+}
+
+static struct syscore_ops gpioint_syscore_ops = {
+	.suspend	= s5p_gpioint_save,
+	.resume		= s5p_gpioint_restore,
+};
+
+static __init int gpioint_syscore_init(void)
+{
+	register_syscore_ops(&gpioint_syscore_ops);
+	return 0;
+}
+arch_initcall(gpioint_syscore_init);
+#endif
