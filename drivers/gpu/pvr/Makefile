@@ -15,14 +15,15 @@ ccflags-y += \
 	-DPVR_LINUX_TIMERS_USING_WORKQUEUES \
 	-DSYS_CUSTOM_POWERLOCK_WRAP \
 	-DSUPPORT_MEMINFO_IDS \
-	-DDISPLAY_CONTROLLER=s3c_lcd \
+	-DDISPLAY_CONTROLLER=s3clfb \
 	-DPVRSRV_MODNAME="\"pvrsrvkm\"" \
 	-DPVR_LDM_DRIVER_REGISTRATION_NAME="\"pvrsrvkm\"" \
 	-DSUPPORT_DC_CMDCOMPLETE_WHEN_NO_LONGER_DISPLAYED \
 	-DSUPPORT_LARGE_GENERAL_HEAP \
 	-Idrivers/gpu/pvr/sgx \
 	-DSLSI_S5PC110 \
-	-DSGX_EARLYSUSPEND
+	-DSGX_EARLYSUSPEND \
+	-DS3CLFB_CONSOLE_NOLOCK
 
 ccflags-$(CONFIG_PVR_SGXCORE_540) += \
 	-DSGX540 -DSUPPORT_SGX540 \
@@ -100,11 +101,11 @@ pvrsrvkm-y := \
 	sgx/mmu.o \
 	sgx/pb.o
 
-s3c_lcd-y := \
-	s3c_lcd/s3c_displayclass.o \
-	s3c_lcd/s3c_lcd.o
+s3clfb-y := \
+	s3clfb/s3clfb_displayclass.o \
+	s3clfb/s3clfb_linux.o
 
 obj-$(CONFIG_PVR_SGX) += pvrsrvkm.o
-obj-$(CONFIG_PVR_SGX) += s3c_lcd.o
+obj-$(CONFIG_PVR_SGX) += s3clfb.o
 # no Makefile in dbgdrv
 #obj-$(CONFIG_PVR_PDUMP) += dbgdrv/
