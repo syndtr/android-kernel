@@ -20,6 +20,7 @@
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
+#include <linux/workqueue.h>
 
 /* Version */
 #define MXT_VER_20		20
@@ -252,6 +253,7 @@ struct mxt_data {
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	const struct mxt_platform_data *pdata;
+	struct work_struct work;
 	struct mxt_object *object_table;
 	struct mxt_info info;
 	struct mxt_finger finger[MXT_MAX_FINGER];
@@ -606,9 +608,9 @@ static void mxt_input_touchevent(struct mxt_data *data,
 	mxt_input_report(data, id);
 }
 
-static irqreturn_t mxt_interrupt(int irq, void *dev_id)
+static void mxt_work(struct work_struct *work)
 {
-	struct mxt_data *data = dev_id;
+	struct mxt_data *data = container_of(work, struct mxt_data, work);
 	struct mxt_message message;
 	struct mxt_object *object;
 	struct device *dev = &data->client->dev;
@@ -620,7 +622,7 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 	do {
 		if (mxt_read_message(data, &message)) {
 			dev_err(dev, "Failed to read message\n");
-			goto end;
+			return;
 		}
 
 		reportid = message.reportid;
@@ -628,7 +630,7 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 		/* whether reportid is thing of MXT_TOUCH_MULTI_T9 */
 		object = mxt_get_object(data, MXT_TOUCH_MULTI_T9);
 		if (!object)
-			goto end;
+			return;
 
 		max_reportid = object->max_reportid;
 		min_reportid = max_reportid - object->num_report_ids + 1;
@@ -639,8 +641,14 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 		else
 			mxt_dump_message(dev, &message);
 	} while (reportid != 0xff);
+}
 
-end:
+static irqreturn_t mxt_interrupt(int irq, void *dev_id)
+{
+	struct mxt_data *data = dev_id;
+
+	schedule_work(&data->work);
+
 	return IRQ_HANDLED;
 }
 
@@ -1154,6 +1162,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	if (error)
 		goto err_free_object;
 
+	INIT_WORK(&data->work, mxt_work);
+	
 	error = request_threaded_irq(client->irq, NULL, mxt_interrupt,
 			pdata->irqflags, client->dev.driver->name, data);
 	if (error) {
