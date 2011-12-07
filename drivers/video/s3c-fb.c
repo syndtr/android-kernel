@@ -984,7 +984,7 @@ static irqreturn_t s3c_fb_irq(int irq, void *dev_id)
  * @sfb: main hardware state
  * @crtc: head index.
  */
-static int s3c_fb_wait_for_vsync(struct s3c_fb *sfb, u32 crtc)
+static int _s3c_fb_wait_for_vsync(struct s3c_fb *sfb, u32 crtc)
 {
 	unsigned long count;
 	int ret;
@@ -1003,6 +1003,15 @@ static int s3c_fb_wait_for_vsync(struct s3c_fb *sfb, u32 crtc)
 	return 0;
 }
 
+int s3c_fb_wait_for_vsync(struct fb_info *info)
+{
+	struct s3c_fb_win *win = info->par;
+	struct s3c_fb *sfb = win->parent;
+	
+	return _s3c_fb_wait_for_vsync(sfb, 0);
+}
+EXPORT_SYMBOL_GPL(s3c_fb_wait_for_vsync);
+
 static int s3c_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			unsigned long arg)
 {
@@ -1018,7 +1027,7 @@ static int s3c_fb_ioctl(struct fb_info *info, unsigned int cmd,
 			break;
 		}
 
-		ret = s3c_fb_wait_for_vsync(sfb, crtc);
+		ret = _s3c_fb_wait_for_vsync(sfb, crtc);
 		break;
 	default:
 		ret = -ENOTTY;
