@@ -14,7 +14,9 @@
 #include <linux/fb.h>
 #include <linux/lcd.h>
 
+#include <mach/map.h>
 #include <mach/gpio.h>
+#include <mach/qss-pd.h>
 
 #include <plat/devs.h>
 #include <plat/gpio-cfg.h>
@@ -74,13 +76,22 @@ static struct platform_device qss_device_spi_gpio = {
 	},
 };
 
-static struct platform_device pvr_device_g3d = {
-	.name		= "pvrsrvkm",
-	.id		= -1,
+/* G3D */
+
+static struct resource g3d_resource[] = {
+	[0] = DEFINE_RES_MEM(S5PV210_PA_G3D, SZ_16M),
+	[1] = DEFINE_RES_IRQ(IRQ_3D),
 };
 
-static struct platform_device pvr_device_lcd = {
-	.name		= "s3c_lcd",
+static struct platform_device qss_device_g3d = {
+	.name		= "s5pc110-g3d",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(g3d_resource),
+	.resource	= g3d_resource,
+};
+
+static struct platform_device qss_device_g3dfb = {
+	.name		= "s3c-g3dfb",
 	.id		= -1,
 };
 
@@ -134,10 +145,11 @@ static void __init qss_display_cfg_gpio(void)
 }
 
 static struct platform_device *qss_devices[] __initdata = {
+	&s5pv210_pd_lcd,
 	&s3c_device_fb,
 	&qss_device_spi_gpio,
-	&pvr_device_g3d,
-	&pvr_device_lcd,
+	&qss_device_g3d,
+	&qss_device_g3dfb
 };
 
 void __init qss_display_init(void)
