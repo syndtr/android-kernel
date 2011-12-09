@@ -421,9 +421,8 @@ S3CLFB_ERROR S3CLFBDisableLFBEventNotification(S3CLFB_DEVINFO *psDevInfo)
 	return (S3CLFB_OK);
 }
 
-static int __init S3CLFB_Init(void)
+static int __devinit s3clfb_probe(struct platform_device *pdev)
 {
-
 	if(S3CLFBInit() != S3CLFB_OK)
 	{
 		printk(KERN_ERR DRIVER_PREFIX ": %s: S3CLFBInit failed\n", __FUNCTION__);
@@ -431,16 +430,42 @@ static int __init S3CLFB_Init(void)
 	}
 
 	return 0;
-
 }
 
-static void __exit S3CLFB_Cleanup(void)
-{    
+static int __devexit s3clfb_remove(struct platform_device *pdev)
+{
 	if(S3CLFBDeInit() != S3CLFB_OK)
 	{
 		printk(KERN_ERR DRIVER_PREFIX ": %s: S3CLFBDeInit failed\n", __FUNCTION__);
 	}
+	
+	return 0;
 }
 
-late_initcall(S3CLFB_Init);
-module_exit(S3CLFB_Cleanup);
+static struct platform_driver s3clfb_driver = {
+	.probe = s3clfb_probe,
+	.remove = __devexit_p(s3clfb_remove),
+	.driver = {
+		   .name = "s3c-g3dfb",
+		   .owner = THIS_MODULE,
+	},
+};
+
+static int __init s3clfb_init(void)
+{
+	platform_driver_register(&s3clfb_driver);
+
+	return 0;
+}
+
+static void __exit s3clfb_cleanup(void)
+{
+	platform_driver_unregister(&s3clfb_driver);
+}
+
+module_init(s3clfb_init);
+module_exit(s3clfb_cleanup);
+
+MODULE_AUTHOR("Imagination Technologies Ltd. <gpl-support@imgtec.com>");
+MODULE_DESCRIPTION("Samsung S3C PVR Framebuffer driver");
+MODULE_LICENSE("GPL");
