@@ -1,7 +1,7 @@
 /**********************************************************************
  *
- * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 		Samsung Electronics System LSI. modify
+ * Copyright (C) Imagination Technologies Ltd. All rights reserved.
+ * 
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
@@ -27,35 +27,15 @@
 #if !defined(__SYSINFO_H__)
 #define __SYSINFO_H__
 
-
+#if defined(PVR_LINUX_USING_WORKQUEUES)
 #define MAX_HW_TIME_US				(1000000)
-#if defined (SLSI_S5PC110)
-//#define WAIT_TRY_COUNT				(30000)
-#define WAIT_TRY_COUNT				(10000)
+#define WAIT_TRY_COUNT				(20000)
 #else
+#define MAX_HW_TIME_US				(500000)
 #define WAIT_TRY_COUNT				(10000)
 #endif
 
 
-typedef enum _SYS_DEVICE_TYPE_
-{
-	SYS_DEVICE_SGX						= 0,
-
-	SYS_DEVICE_FORCE_I16 				= 0x7fff
-
-} SYS_DEVICE_TYPE;
-
-#define SYS_DEVICE_COUNT 3 
-
-
-
-#define SGX_SP_FIFO_DWSIZE         	123
-
-
-#define SGX_SP_FIFO_RESERVEBYTES   	(SGX_SP_FIFO_DWSIZE & -4)
-#define SGX_SP_FIFO_MAXALLOWEDBYTES	(SGX_SP_FIFO_DWSIZE * 4) - SGX_SP_FIFO_RESERVEBYTES
-
-#define SGX_EXTRACT_FIFO_COUNT(x)   (((x) & SGX_INT_TA_FREEVCOUNT_MASK) >> SGX_INT_TA_FREEVCOUNT_SHIFT)
-
+#define SYS_DEVICE_COUNT 15 
 
 #endif	

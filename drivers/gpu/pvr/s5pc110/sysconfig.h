@@ -1,7 +1,7 @@
 /**********************************************************************
  *
- * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 		Samsung Electronics System LSI. modify
+ * Copyright (C) Imagination Technologies Ltd. All rights reserved.
+ * 
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
@@ -27,25 +27,29 @@
 #if !defined(__SOCCONFIG_H__)
 #define __SOCCONFIG_H__
 
-#include "syscommon.h"
+#define VS_PRODUCT_NAME		"S3C"
 
-#define VS_PRODUCT_NAME	"s5pc110"
+#define SYS_SGX_CLOCK_SPEED	200000000
 
-extern struct platform_device *gpsPVRLDMDev;
+#define SYS_SGX_HWRECOVERY_TIMEOUT_FREQ	(100)
+#define SYS_SGX_PDS_TIMER_FREQ		(1000)
 
-#define SYS_SGX_USSE_COUNT					(1)
-
-#define SGX_REG_SIZE 	0x4000
-#define SGX_SP_SIZE		(0x10000-SGX_REG_SIZE)
-
-#if defined(SGX_FEATURE_HOST_PORT)
-	
-	#define SYS_SGX_HP_SIZE		0x0
-	
-	#define SYS_SGX_HOSTPORT_BASE_DEVVADDR 0x0
-	#if defined(FIX_HW_BRN_22997) && defined(FIX_HW_BRN_23030)
-		
-		#define SYS_SGX_HOSTPORT_BRN23030_OFFSET 0x0
-	#endif
+#if !defined(SYS_SGX_ACTIVE_POWER_LATENCY_MS)
+#define SYS_SGX_ACTIVE_POWER_LATENCY_MS	(2)
 #endif
+
+#define SGX_REGS_SIZE		SZ_16M
+
+#define DEVICE_SGX_INTERRUPT	(1<<0)
+#define DEVICE_MSVDX_INTERRUPT	(1<<1)
+#define DEVICE_DISP_INTERRUPT	(1<<2)
+
+#if defined(__linux__)
+#if defined(PVR_LDM_PLATFORM_PRE_REGISTERED_DEV)
+#define	SYS_SGX_DEV_NAME	PVR_LDM_PLATFORM_PRE_REGISTERED_DEV
+#else
+#define	SYS_SGX_DEV_NAME	"s5pc110-g3d"
+#endif	
+#endif	
+ 
 #endif	
