@@ -21,6 +21,7 @@
 #include <linux/interrupt.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
+#include <linux/earlysuspend.h>
 
 /* Version */
 #define MXT_VER_20		20
@@ -260,6 +261,9 @@ struct mxt_data {
 	unsigned int irq;
 	unsigned int max_x;
 	unsigned int max_y;
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend early_suspend;
+#endif
 };
 
 static bool mxt_object_readable(unsigned int type)
@@ -1070,11 +1074,18 @@ static const struct attribute_group mxt_attr_group = {
 	.attrs = mxt_attrs,
 };
 
+static void mxt_onoff(struct mxt_data *data, int onoff)
+{
+	if (data->pdata->onoff)
+		data->pdata->onoff(onoff);
+}
+
 static void mxt_start(struct mxt_data *data)
 {
 	/* Touch enable */
 	mxt_write_object(data,
 			MXT_TOUCH_MULTI_T9, MXT_TOUCH_CTRL, 0x83);
+	enable_irq(data->irq);
 }
 
 static void mxt_stop(struct mxt_data *data)
@@ -1082,6 +1093,7 @@ static void mxt_stop(struct mxt_data *data)
 	/* Touch disable */
 	mxt_write_object(data,
 			MXT_TOUCH_MULTI_T9, MXT_TOUCH_CTRL, 0);
+	disable_irq(data->irq);
 }
 
 static int mxt_input_open(struct input_dev *dev)
@@ -1099,6 +1111,9 @@ static void mxt_input_close(struct input_dev *dev)
 
 	mxt_stop(data);
 }
+
+static void mxt_earlysuspend(struct early_suspend *h);
+static void mxt_lateresume(struct early_suspend *h);
 
 static int __devinit mxt_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
@@ -1129,6 +1144,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->input_dev = input_dev;
 	data->pdata = pdata;
 	data->irq = client->irq;
+
+	mxt_onoff(data, 1);
 
 	mxt_calc_resolution(data);
 
@@ -1171,6 +1188,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		goto err_free_object;
 	}
 
+	disable_irq(data->irq);
+
 	error = mxt_make_highchg(data);
 	if (error)
 		goto err_free_irq;
@@ -1183,6 +1202,12 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	if (error)
 		goto err_unregister_device;
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	data->early_suspend.suspend = mxt_earlysuspend;
+	data->early_suspend.resume = mxt_lateresume;
+	data->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
+	register_early_suspend(&data->early_suspend);
+#endif
 	return 0;
 
 err_unregister_device:
@@ -1193,6 +1218,7 @@ err_free_irq:
 err_free_object:
 	kfree(data->object_table);
 err_free_mem:
+	mxt_onoff(data, 0);
 	input_free_device(input_dev);
 	kfree(data);
 	return error;
@@ -1201,6 +1227,10 @@ err_free_mem:
 static int __devexit mxt_remove(struct i2c_client *client)
 {
 	struct mxt_data *data = i2c_get_clientdata(client);
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&data->early_suspend);
+#endif
 
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	free_irq(data->irq, data);
@@ -1212,6 +1242,43 @@ static int __devexit mxt_remove(struct i2c_client *client)
 }
 
 #ifdef CONFIG_PM
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void mxt_earlysuspend(struct early_suspend *h)
+{
+	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+	struct input_dev *input_dev = data->input_dev;
+
+	mutex_lock(&input_dev->mutex);
+
+	if (input_dev->users)
+		mxt_stop(data);
+
+	mutex_unlock(&input_dev->mutex);
+
+	mxt_onoff(data, 0);
+}
+
+static void mxt_lateresume(struct early_suspend *h)
+{
+	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+	struct input_dev *input_dev = data->input_dev;
+
+	mxt_onoff(data, 1);
+
+	/* Soft reset */
+	mxt_write_object(data, MXT_GEN_COMMAND_T6,
+			MXT_COMMAND_RESET, 1);
+
+	msleep(MXT_RESET_TIME);
+
+	mutex_lock(&input_dev->mutex);
+
+	if (input_dev->users)
+		mxt_start(data);
+
+	mutex_unlock(&input_dev->mutex);
+}
+#else
 static int mxt_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
@@ -1255,6 +1322,7 @@ static const struct dev_pm_ops mxt_pm_ops = {
 	.resume		= mxt_resume,
 };
 #endif
+#endif
 
 static const struct i2c_device_id mxt_id[] = {
 	{ "qt602240_ts", 0 },
@@ -1268,7 +1336,7 @@ static struct i2c_driver mxt_driver = {
 	.driver = {
 		.name	= "atmel_mxt_ts",
 		.owner	= THIS_MODULE,
-#ifdef CONFIG_PM
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
 		.pm	= &mxt_pm_ops,
 #endif
 	},
