@@ -24,6 +24,9 @@
 #include <linux/uaccess.h>
 #include <linux/interrupt.h>
 #include <linux/pm_runtime.h>
+#include <linux/regulator/consumer.h>
+#include <linux/earlysuspend.h>
+#include <linux/delay.h>
 
 #include <mach/map.h>
 #include <plat/regs-fb-v4.h>
@@ -215,6 +218,14 @@ struct s3c_fb {
 	int			 irq_no;
 	unsigned long		 irq_flags;
 	struct s3c_fb_vsync	 vsync_info;
+
+	struct regulator	*pd;
+	struct regulator	*vlcd;
+	struct regulator	*vcc_lcd;
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend	early_suspend;
+#endif
 };
 
 /**
@@ -1324,6 +1335,71 @@ static void s3c_fb_clear_win(struct s3c_fb *sfb, int win)
 	writel(reg & ~SHADOWCON_WINx_PROTECT(win), regs + SHADOWCON);
 }
 
+static void s3c_fb_regulator_get(struct s3c_fb *sfb)
+{
+	sfb->pd = regulator_get(sfb->dev, "pd-lcd");
+	if (!sfb->pd)
+		dev_warn(sfb->dev, "regulator: failed to get pd-lcd\n");
+
+	sfb->vcc_lcd = regulator_get(sfb->dev, "vcc_lcd");
+	if (!sfb->vcc_lcd)
+		dev_warn(sfb->dev, "regulator: failed to get vcc_lcd\n");	
+
+	sfb->vlcd = regulator_get(sfb->dev, "vlcd");
+	if (!sfb->vlcd)
+		dev_warn(sfb->dev, "regulator: failed to get vlcd\n");	
+}
+
+static void s3c_fb_regulator_put(struct s3c_fb *sfb)
+{
+	if (sfb->pd)
+		regulator_put(sfb->pd);
+
+	if (sfb->vcc_lcd)
+		regulator_put(sfb->vcc_lcd);
+
+	if (sfb->vlcd)
+		regulator_put(sfb->vlcd);
+}
+
+static void s3c_fb_regulator_enable(struct s3c_fb *sfb)
+{
+	int ret;
+
+	if (sfb->vcc_lcd) {
+		ret = regulator_enable(sfb->vcc_lcd);
+		if (ret)
+			dev_err(sfb->dev, "regulator: failed to enable vcc_lcd\n");
+	}
+
+	if (sfb->vlcd) {
+		ret = regulator_enable(sfb->vlcd);
+		if (ret)
+			dev_err(sfb->dev, "regulator: failed to enable vlcd\n");
+	}
+
+	if (sfb->pd) {
+		ret = regulator_enable(sfb->pd);
+		if (ret)
+			dev_err(sfb->dev, "regulator: failed to enable pd\n");
+	}
+}
+
+static void s3c_fb_regulator_disable(struct s3c_fb *sfb)
+{
+	if (sfb->pd)
+		regulator_disable(sfb->pd);
+
+	if (sfb->vlcd)
+		regulator_disable(sfb->vlcd);
+
+	if (sfb->vcc_lcd)
+		regulator_disable(sfb->vcc_lcd);
+}
+
+static void s3c_fb_earlysuspend(struct early_suspend *h);
+static void s3c_fb_lateresume(struct early_suspend *h);
+
 static int __devinit s3c_fb_probe(struct platform_device *pdev)
 {
 	const struct platform_device_id *platid;
@@ -1362,6 +1438,9 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 	sfb->variant = fbdrv->variant;
 
 	spin_lock_init(&sfb->slock);
+
+	s3c_fb_regulator_get(sfb);
+	s3c_fb_regulator_enable(sfb);
 
 	sfb->bus_clk = clk_get(dev, "lcd");
 	if (IS_ERR(sfb->bus_clk)) {
@@ -1468,6 +1547,13 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, sfb);
 	pm_runtime_put_sync(sfb->dev);
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	sfb->early_suspend.suspend = s3c_fb_earlysuspend;
+	sfb->early_suspend.resume = s3c_fb_lateresume;
+	sfb->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 5;
+	register_early_suspend(&sfb->early_suspend);
+#endif
+
 	return 0;
 
 err_irq:
@@ -1490,6 +1576,8 @@ err_bus_clk:
 	clk_put(sfb->bus_clk);
 
 err_sfb:
+	s3c_fb_regulator_disable(sfb);
+	s3c_fb_regulator_put(sfb);
 	kfree(sfb);
 	return ret;
 }
@@ -1505,6 +1593,10 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 {
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
 	int win;
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&sfb->early_suspend);
+#endif
 
 	pm_runtime_get_sync(sfb->dev);
 
@@ -1529,11 +1621,89 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 	pm_runtime_put_sync(sfb->dev);
 	pm_runtime_disable(sfb->dev);
 
+	s3c_fb_regulator_disable(sfb);
+	s3c_fb_regulator_put(sfb);
+
 	kfree(sfb);
 	return 0;
 }
 
 #ifdef CONFIG_PM
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void s3c_fb_earlysuspend(struct early_suspend *h)
+{
+	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
+	struct s3c_fb_win *win;
+	int win_no;
+
+	for (win_no = S3C_FB_MAX_WIN - 1; win_no >= 0; win_no--) {
+		win = sfb->windows[win_no];
+		if (!win)
+			continue;
+
+		/* use the blank function to push into power-down */
+		s3c_fb_blank(FB_BLANK_POWERDOWN, win->fbinfo);
+	}
+
+	disable_irq(sfb->irq_no);
+
+	if (!sfb->variant.has_clksel)
+		clk_disable(sfb->lcd_clk);
+
+	clk_disable(sfb->bus_clk);
+
+	s3c_fb_regulator_disable(sfb);
+}
+
+static void s3c_fb_lateresume(struct early_suspend *h)
+{
+	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
+	struct s3c_fb_platdata *pd = sfb->pdata;
+	struct s3c_fb_win *win;
+	int win_no;
+
+	s3c_fb_regulator_enable(sfb);
+
+	clk_enable(sfb->bus_clk);
+
+	if (!sfb->variant.has_clksel)
+		clk_enable(sfb->lcd_clk);
+
+	/* setup gpio and output polarity controls */
+	pd->setup_gpio();
+	writel(pd->vidcon1, sfb->regs + VIDCON1);
+
+	/* zero all windows before we do anything */
+	for (win_no = 0; win_no < sfb->variant.nr_windows; win_no++)
+		s3c_fb_clear_win(sfb, win_no);
+
+	for (win_no = 0; win_no < sfb->variant.nr_windows - 1; win_no++) {
+		void __iomem *regs = sfb->regs + sfb->variant.keycon;
+
+		regs += (win_no * 8);
+		writel(0xffffff, regs + WKEYCON0);
+		writel(0xffffff, regs + WKEYCON1);
+	}
+
+	/* restore framebuffers */
+	for (win_no = 0; win_no < S3C_FB_MAX_WIN; win_no++) {
+		win = sfb->windows[win_no];
+		if (!win)
+			continue;
+
+		dev_dbg(sfb->dev, "resuming window %d\n", win_no);
+		s3c_fb_blank(FB_BLANK_NORMAL, win->fbinfo);
+		s3c_fb_set_par(win->fbinfo);
+	}
+
+	/* reset irq */
+	clear_bit(S3C_FB_VSYNC_IRQ_EN, &sfb->irq_flags);
+	writel(VIDINTCON1_INT_FIFO | VIDINTCON1_INT_FRAME | VIDINTCON1_INT_I180,
+	       sfb->regs + VIDINTCON1);
+
+	enable_irq(sfb->irq_no);
+}
+#else
 static int s3c_fb_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
@@ -1664,13 +1834,14 @@ static int s3c_fb_runtime_resume(struct device *dev)
 	return 0;
 }
 
-#else
-#define s3c_fb_suspend NULL
-#define s3c_fb_resume  NULL
-#define s3c_fb_runtime_suspend NULL
-#define s3c_fb_runtime_resume NULL
+static const struct dev_pm_ops s3c_fb_pm_ops = {
+	.suspend		= s3c_fb_suspend,
+	.resume			= s3c_fb_resume,
+	.runtime_suspend	= s3c_fb_runtime_suspend,
+	.runtime_resume		= s3c_fb_runtime_resume,
+};
 #endif
-
+#endif
 
 #define VALID_BPP124 (VALID_BPP(1) | VALID_BPP(2) | VALID_BPP(4))
 #define VALID_BPP1248 (VALID_BPP124 | VALID_BPP(8))
@@ -1993,13 +2164,6 @@ static struct platform_device_id s3c_fb_driver_ids[] = {
 };
 MODULE_DEVICE_TABLE(platform, s3c_fb_driver_ids);
 
-static const struct dev_pm_ops s3cfb_pm_ops = {
-	.suspend	= s3c_fb_suspend,
-	.resume		= s3c_fb_resume,
-	.runtime_suspend	= s3c_fb_runtime_suspend,
-	.runtime_resume		= s3c_fb_runtime_resume,
-};
-
 static struct platform_driver s3c_fb_driver = {
 	.probe		= s3c_fb_probe,
 	.remove		= __devexit_p(s3c_fb_remove),
@@ -2007,7 +2171,9 @@ static struct platform_driver s3c_fb_driver = {
 	.driver		= {
 		.name	= "s3c-fb",
 		.owner	= THIS_MODULE,
-		.pm	= &s3cfb_pm_ops,
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+		.pm	= &s3c_fb_pm_ops,
+#endif
 	},
 };
 
