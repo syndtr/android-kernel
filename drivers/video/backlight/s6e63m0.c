@@ -31,6 +31,7 @@
 #include <linux/lcd.h>
 #include <linux/backlight.h>
 #include <linux/module.h>
+#include <linux/earlysuspend.h>
 
 #include "s6e63m0_gamma.h"
 
@@ -55,6 +56,10 @@ struct s6e63m0 {
 	struct lcd_device		*ld;
 	struct backlight_device		*bd;
 	struct lcd_platform_data	*lcd_pd;
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend		early_suspend;
+	struct early_suspend		late_resume;
+#endif
 };
 
 static const unsigned short SEQ_PANEL_CONDITION_SET[] = {
@@ -733,6 +738,9 @@ static ssize_t s6e63m0_sysfs_show_gamma_table(struct device *dev,
 static DEVICE_ATTR(gamma_table, 0444,
 		s6e63m0_sysfs_show_gamma_table, NULL);
 
+static void s6e63m0_earlysuspend(struct early_suspend *h);
+static void s6e63m0_lateresume(struct early_suspend *h);
+
 static int __devinit s6e63m0_probe(struct spi_device *spi)
 {
 	int ret = 0;
@@ -818,6 +826,15 @@ static int __devinit s6e63m0_probe(struct spi_device *spi)
 
 	dev_set_drvdata(&spi->dev, lcd);
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	lcd->early_suspend.suspend = s6e63m0_earlysuspend;
+	lcd->early_suspend.level = EARLY_SUSPEND_LEVEL_STOP_DRAWING - 1;
+	register_early_suspend(&lcd->early_suspend);
+	lcd->late_resume.resume = s6e63m0_lateresume;
+	lcd->late_resume.level = EARLY_SUSPEND_LEVEL_DISABLE_FB - 10;
+	register_early_suspend(&lcd->late_resume);
+#endif
+
 	dev_info(&spi->dev, "s6e63m0 panel driver has been probed.\n");
 
 	return 0;
@@ -833,6 +850,11 @@ static int __devexit s6e63m0_remove(struct spi_device *spi)
 {
 	struct s6e63m0 *lcd = dev_get_drvdata(&spi->dev);
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	unregister_early_suspend(&lcd->early_suspend);
+	unregister_early_suspend(&lcd->late_resume);
+#endif
+
 	s6e63m0_power(lcd, FB_BLANK_POWERDOWN);
 	device_remove_file(&spi->dev, &dev_attr_gamma_table);
 	device_remove_file(&spi->dev, &dev_attr_gamma_mode);
@@ -846,6 +868,35 @@ static int __devexit s6e63m0_remove(struct spi_device *spi)
 #if defined(CONFIG_PM)
 static unsigned int before_power;
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void s6e63m0_earlysuspend(struct early_suspend *h)
+{
+	struct s6e63m0 *lcd = container_of(h, struct s6e63m0, early_suspend);
+
+	before_power = lcd->power;
+
+	/*
+	 * when lcd panel is suspend, lcd panel becomes off
+	 * regardless of status.
+	 */
+	s6e63m0_power(lcd, FB_BLANK_POWERDOWN);
+}
+
+static void s6e63m0_lateresume(struct early_suspend *h)
+{
+	struct s6e63m0 *lcd = container_of(h, struct s6e63m0, late_resume);
+
+	/*
+	 * after suspended, if lcd panel status is FB_BLANK_UNBLANK
+	 * (at that time, before_power is FB_BLANK_UNBLANK) then
+	 * it changes that status to FB_BLANK_POWERDOWN to get lcd on.
+	 */
+	if (before_power == FB_BLANK_UNBLANK)
+		lcd->power = FB_BLANK_POWERDOWN;
+
+	s6e63m0_power(lcd, before_power);
+}
+#else
 static int s6e63m0_suspend(struct spi_device *spi, pm_message_t mesg)
 {
 	int ret = 0;
@@ -883,9 +934,12 @@ static int s6e63m0_resume(struct spi_device *spi)
 
 	return ret;
 }
-#else
-#define s6e63m0_suspend		NULL
-#define s6e63m0_resume		NULL
+
+static const struct dev_pm_ops s6e63m0_pm_ops = {
+	.suspend	= s6e63m0_suspend,
+	.resume		= s6e63m0_resume,
+};
+#endif
 #endif
 
 /* Power down all displays on reboot, poweroff or halt. */
@@ -901,12 +955,13 @@ static struct spi_driver s6e63m0_driver = {
 		.name	= "s6e63m0",
 		.bus	= &spi_bus_type,
 		.owner	= THIS_MODULE,
+#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
+		.pm	= &s6e63m0_pm_ops,
+#endif
 	},
 	.probe		= s6e63m0_probe,
 	.remove		= __devexit_p(s6e63m0_remove),
 	.shutdown	= s6e63m0_shutdown,
-	.suspend	= s6e63m0_suspend,
-	.resume		= s6e63m0_resume,
 };
 
 static int __init s6e63m0_init(void)
