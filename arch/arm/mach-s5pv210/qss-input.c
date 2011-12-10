@@ -85,6 +85,14 @@ static void __init qss_keypad_cfg_gpio(void)
 
 /* Touch Screen */
 
+static void tsp_onoff(int onoff)
+{
+	gpio_direction_output(GPIO_TSP_LDO_EN, onoff);
+
+	if (onoff)
+		msleep(75);
+}
+
 static struct mxt_platform_data qt602240_pdata = {
 	.x_line		= 19,
 	.y_line		= 11,
@@ -95,6 +103,7 @@ static struct mxt_platform_data qt602240_pdata = {
 	.voltage	= 2800000,              /* 2.8V */
 	.orient		= MXT_DIAGONAL,
 	.irqflags	= IRQF_TRIGGER_FALLING,
+	.onoff		= tsp_onoff,
 };
 
 static struct s3c2410_platform_i2c i2c2_pdata = {
@@ -103,6 +112,7 @@ static struct s3c2410_platform_i2c i2c2_pdata = {
 	.slave_addr	= 0x10,
 	.frequency	= 400 * 1000,
 	.sda_delay	= 100,
+	.cfg_gpio	= s3c_i2c2_cfg_gpio,
 };
 
 static struct i2c_board_info i2c2_devs[] __initdata = {
@@ -116,11 +126,9 @@ static void __init qss_tsp_cfg_gpio(void)
 {
 	int ret;
 
-	/* i2c gpio cfg */
-	s3c_i2c2_cfg_gpio(&s3c_device_i2c2);
-
 	s3c_gpio_cfgrange_nopull(GPIO_TSP_LDO_EN, 1, S3C_GPIO_OUTPUT);
-	gpio_set_value(GPIO_TSP_LDO_EN, 1);
+	gpio_request(GPIO_TSP_LDO_EN, "TSP_LDO_EN");
+	tsp_onoff(1);
 
 	/* gpio interrupt */
 	s3c_gpio_cfgall_range(GPIO_TSP_INT, 1, EINT_MODE, S3C_GPIO_PULL_UP);
