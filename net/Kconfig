@@ -79,6 +79,12 @@ source "net/netlabel/Kconfig"
 
 endif # if INET
 
+config ANDROID_PARANOID_NETWORK
+	bool "Android Paranoid Networking"
+	default y
+	help
+		Only allow certain groups to create sockets
+
 config NETWORK_SECMARK
 	bool "Security Marking"
 	help
