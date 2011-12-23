@@ -42,6 +42,10 @@ static struct regulator_consumer_supply ldo7_consumer[] = {
 	{ .supply = "vlcd", },
 };
 
+static struct regulator_consumer_supply ldo8_consumer[] = {
+	REGULATOR_SUPPLY("pd_core", "s3c-hsotg")
+};
+
 static struct regulator_consumer_supply ldo11_consumer[] = {
 	{ .supply = "cam_af", },
 };
@@ -157,10 +161,6 @@ static struct regulator_init_data qss_ldo7_data = {
 	},
 	.num_consumer_supplies	= ARRAY_SIZE(ldo7_consumer),
 	.consumer_supplies	= ldo7_consumer,
-};
-
-static struct regulator_consumer_supply ldo8_consumer[] = {
-	REGULATOR_SUPPLY("pd_core", "s3c-hsotg")
 };
 
 static struct regulator_init_data qss_ldo8_data = {
