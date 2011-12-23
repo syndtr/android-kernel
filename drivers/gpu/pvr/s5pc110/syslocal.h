@@ -31,6 +31,7 @@
 
 #include <linux/version.h>
 #include <linux/clk.h>
+#include <linux/regulator/consumer.h>
 #if defined(PVR_LINUX_USING_WORKQUEUES)
 #include <linux/mutex.h>
 #else
@@ -127,6 +128,7 @@ typedef struct _SYS_SPECIFIC_DATA_TAG_
 	atomic_t	sNotifyLockCPU;
 	IMG_BOOL	bCallVDD2PostFunc;
 #endif
+	struct regulator *g3d_pd;
 	struct clk	*g3d_clk;
 	IMG_UINT32 ui32SGXFreqListSize;
 	IMG_UINT32 *pui32SGXFreqList;
