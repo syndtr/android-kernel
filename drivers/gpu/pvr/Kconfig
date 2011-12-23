@@ -2,7 +2,6 @@
 config PVR_SGX
 	tristate "PowerVR SGX support"
 	depends on ARCH_S5PV210
-	select PVR_OMAP_DSS2
 	help
 	  Enable this option to build support for the PowerVR SGX 3D core.
 
@@ -104,23 +103,3 @@ config PVR_PDUMP
 	bool "Support for parameter dumping (Pdump)"
 	depends on PVR_SGX
 	default n
-
-choice
-	prompt "SGX DVFS mode"
-	depends on PVR_SGX
-	default SGX_DVFS_MODE_NONE
-
-config SGX_DVFS_MODE_NONE
-	bool "None"
-
-config SGX_DVFS_MODE_LINEAR
-	bool "Linear"
-
-config SGX_DVFS_MODE_OPTIMIZED
-	bool "Optimized"
-endchoice
-
-config SGX_DVFS_IDLE_TIMEOUT
-	int "DVFS idle timeout (us)"
-	depends on PVR_SGX
-	default 1000
