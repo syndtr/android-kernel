@@ -146,6 +146,7 @@ static void __init qss_display_cfg_gpio(void)
 
 static struct platform_device *qss_devices[] __initdata = {
 	&s5pv210_pd_lcd,
+	&s5pv210_pd_g3d,
 	&s3c_device_fb,
 	&qss_device_spi_gpio,
 	&qss_device_g3d,
