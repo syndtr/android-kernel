@@ -927,6 +927,9 @@ config SYSCTL
 config ANON_INODES
 	bool
 
+config HAVE_PCSPKR_PLATFORM
+	bool
+
 menuconfig EXPERT
 	bool "Configure standard kernel features (expert users)"
 	# Unhide debug options, to make the on-by-default options visible
@@ -1030,9 +1033,6 @@ config PCSPKR_PLATFORM
 	help
           This option allows to disable the internal PC-Speaker
           support, saving some memory.
-
-config HAVE_PCSPKR_PLATFORM
-	bool
 
 config BASE_FULL
 	default y
