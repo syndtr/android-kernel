@@ -26,7 +26,6 @@
 #include <plat/s5pv210.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
-#include <plat/pm.h>
 #include <plat/s5p-time.h>
 
 #include <mach/qss.h>
@@ -104,10 +103,11 @@ static void __init qss_map_io(void)
 
 static void __init qss_machine_init(void)
 {
+	/* initialize pm */
+	qss_pm_init();
+
 	/* initialize gpios */
 	qss_gpio_init();
-
-	s3c_pm_init();
 
 	/* FIQ debugger */
 #ifdef CONFIG_FIQ_DEBUGGER
