@@ -23,4 +23,10 @@ config SWITCH_FSA9480
 	  stereo and mono audio, video, microphone and UART data to use
 	  a common connector port.
 
+config SWITCH_QSS_BOOTPARAM
+	tristate "QSS Boot Parameter support"
+	depends on SWITCH && MACH_QSS
+	help
+	  Say Y here to enable QSS Boot Parameter support.
+
 endif # SWITCH
