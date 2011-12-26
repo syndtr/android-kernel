@@ -25,7 +25,7 @@
 
 static const char *bootmodes[] = {
 	"none",
-	"lpm",
+	"charger",
 	"recovery",
 };
 
