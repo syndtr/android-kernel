@@ -28,19 +28,9 @@ static struct mtd_partition qss_partition_info[] = {
 		.size		= (30*SZ_256K),
 	},
 	{
-		.name		= "system",
+		.name		= "ubi",
 		.offset		= (132*SZ_256K),
-		.size		= (1100*SZ_256K),
-	},
-	{
-		.name		= "cache",
-		.offset		= (1232*SZ_256K),
-		.size		= (100*SZ_256K),
-	},
-	{
-		.name		= "datadata",
-		.offset		= (1332*SZ_256K),
-		.size		= (672*SZ_256K),
+		.size		= (1872*SZ_256K),
 	},
 	{
 		.name		= "efs",
