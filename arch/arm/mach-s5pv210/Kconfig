@@ -126,6 +126,9 @@ config MACH_QSS
 	select CPU_S5PV210
 	select S5P_GPIO_INT
 	select S3C_DEV_FB
+	select S5P_DEV_FIMC0
+	select S5P_DEV_FIMC1
+	select S5P_DEV_FIMC2
 	select S3C_DEV_HSMMC
 	select S3C_DEV_HSMMC1
 	select S3C_DEV_HSMMC2
@@ -136,6 +139,7 @@ config MACH_QSS
 	select S3C_DEV_WDT
 	select S5P_DEV_ONENAND
 	select S5PV210_SETUP_FB_24BPP
+	select S5PV210_SETUP_FIMC
 	select S5PV210_SETUP_I2C2
 	select S5PV210_SETUP_SDHCI
 	help

@@ -133,6 +133,9 @@ static void __init qss_machine_init(void)
 
 	/* Display */
 	qss_display_init();
+
+	/* Media */
+	qss_media_init();
 }
 
 MACHINE_START(QSS, "QSS")

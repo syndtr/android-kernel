@@ -30,7 +30,7 @@ ifeq ($(CONFIG_MACH_QSS),y)
 obj-y				+= mach-qss.o qss-pm.o qss-gpio.o qss-pd.o
 obj-$(CONFIG_FIQ_DEBUGGER)	+= qss-fiqdbg.o
 obj-y				+= qss-input.o qss-mfd.o qss-switch.o qss-sdhci.o
-obj-y				+= qss-onenand.o qss-display.o
+obj-y				+= qss-onenand.o qss-display.o qss-media.o
 endif
 
 # device support
