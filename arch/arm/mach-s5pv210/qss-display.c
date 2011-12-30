@@ -41,7 +41,7 @@ static struct s3c_fb_pd_win fb_win0 = {
 		.vsync_len	= 1,
 		.xres		= LCD_WIDTH,
 		.yres		= LCD_HEIGHT,
-		.refresh	= 55,
+		.refresh	= 60,
 	},
 	.max_bpp	= 32,
 	.default_bpp	= 32,
@@ -51,6 +51,7 @@ static struct s3c_fb_pd_win fb_win0 = {
 
 static struct s3c_fb_platdata fb_pdata __initdata = {
 	.win[0]		= &fb_win0,
+	.default_win	= 0,
 	.vidcon0	= VIDCON0_VIDOUT_RGB | VIDCON0_PNRMODE_RGB |
 			  VIDCON0_CLKSEL_LCD,
 	.vidcon1	= VIDCON1_INV_VCLK | VIDCON1_INV_VDEN
