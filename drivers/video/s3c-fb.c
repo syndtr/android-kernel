@@ -781,14 +781,10 @@ static void s3c_fb_enable(struct s3c_fb *sfb, int enable)
 	if (enable)
 		vidcon0 |= VIDCON0_ENVID | VIDCON0_ENVID_F;
 	else {
-		/* see the note in the framebuffer datasheet about
-		 * why you cannot take both of these bits down at the
-		 * same time. */
-
 		if (!(vidcon0 & VIDCON0_ENVID))
 			return;
 
-		vidcon0 |= VIDCON0_ENVID;
+		vidcon0 &= ~VIDCON0_ENVID;
 		vidcon0 &= ~VIDCON0_ENVID_F;
 	}
 
@@ -838,26 +834,6 @@ static int s3c_fb_blank(int blank_mode, struct fb_info *info)
 	}
 
 	writel(wincon, sfb->regs + sfb->variant.wincon + (index * 4));
-
-	/* Check the enabled state to see if we need to be running the
-	 * main LCD interface, as if there are no active windows then
-	 * it is highly likely that we also do not need to output
-	 * anything.
-	 */
-
-	/* We could do something like the following code, but the current
-	 * system of using framebuffer events means that we cannot make
-	 * the distinction between just window 0 being inactive and all
-	 * the windows being down.
-	 *
-	 * s3c_fb_enable(sfb, sfb->enabled ? 1 : 0);
-	*/
-
-	/* we're stuck with this until we can do something about overriding
-	 * the power control using the blanking event for a single fb.
-	 */
-	if (index == sfb->pdata->default_win)
-		s3c_fb_enable(sfb, blank_mode != FB_BLANK_POWERDOWN ? 1 : 0);
 
 	return 0;
 }
@@ -1366,6 +1342,12 @@ static void s3c_fb_regulator_enable(struct s3c_fb *sfb)
 {
 	int ret;
 
+	if (sfb->pd) {
+		ret = regulator_enable(sfb->pd);
+		if (ret)
+			dev_err(sfb->dev, "regulator: failed to enable pd\n");
+	}
+
 	if (sfb->vcc_lcd) {
 		ret = regulator_enable(sfb->vcc_lcd);
 		if (ret)
@@ -1377,24 +1359,61 @@ static void s3c_fb_regulator_enable(struct s3c_fb *sfb)
 		if (ret)
 			dev_err(sfb->dev, "regulator: failed to enable vlcd\n");
 	}
-
-	if (sfb->pd) {
-		ret = regulator_enable(sfb->pd);
-		if (ret)
-			dev_err(sfb->dev, "regulator: failed to enable pd\n");
-	}
 }
 
 static void s3c_fb_regulator_disable(struct s3c_fb *sfb)
 {
-	if (sfb->pd)
-		regulator_disable(sfb->pd);
-
 	if (sfb->vlcd)
 		regulator_disable(sfb->vlcd);
 
 	if (sfb->vcc_lcd)
 		regulator_disable(sfb->vcc_lcd);
+
+	if (sfb->pd)
+		regulator_disable(sfb->pd);
+
+}
+
+static void s3c_fb_initialize(struct s3c_fb *sfb)
+{
+	struct s3c_fb_platdata *pd = sfb->pdata;
+	struct s3c_fb_win *win;
+	int win_no;
+
+	/* setup gpio */
+	pd->setup_gpio();
+	
+	/* enable fb and setup output polarity controls */
+	s3c_fb_enable(sfb, 1);
+	writel(pd->vidcon1, sfb->regs + VIDCON1);
+
+	/* zero all windows before we do anything */
+	for (win_no = 0; win_no < sfb->variant.nr_windows; win_no++)
+		s3c_fb_clear_win(sfb, win_no);
+
+	for (win_no = 0; win_no < sfb->variant.nr_windows - 1; win_no++) {
+		void __iomem *regs = sfb->regs + sfb->variant.keycon;
+
+		regs += (win_no * 8);
+		writel(0xffffff, regs + WKEYCON0);
+		writel(0xffffff, regs + WKEYCON1);
+	}
+
+	/* restore framebuffers */
+	for (win_no = 0; win_no < S3C_FB_MAX_WIN; win_no++) {
+		win = sfb->windows[win_no];
+		if (!win)
+			continue;
+
+		dev_dbg(sfb->dev, "resuming window %d\n", win_no);
+		s3c_fb_blank(FB_BLANK_NORMAL, win->fbinfo);
+		s3c_fb_set_par(win->fbinfo);
+	}
+
+	/* reset irq */
+	clear_bit(S3C_FB_VSYNC_IRQ_EN, &sfb->irq_flags);
+	writel(VIDINTCON1_INT_FIFO | VIDINTCON1_INT_FRAME | VIDINTCON1_INT_I180,
+	       sfb->regs + VIDINTCON1);
 }
 
 static void s3c_fb_earlysuspend(struct early_suspend *h);
@@ -1629,10 +1648,8 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 }
 
 #ifdef CONFIG_PM
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void s3c_fb_earlysuspend(struct early_suspend *h)
+static void s3c_fb_do_suspend(struct s3c_fb *sfb)
 {
-	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
 	struct s3c_fb_win *win;
 	int win_no;
 
@@ -1641,11 +1658,18 @@ static void s3c_fb_earlysuspend(struct early_suspend *h)
 		if (!win)
 			continue;
 
+		if (sfb->variant.has_shadowcon) {
+			u32 data = readl(sfb->regs + SHADOWCON);
+			data &= ~SHADOWCON_CHx_ENABLE(win->index);
+			data &= ~SHADOWCON_CHx_LOCAL_ENABLE(win->index);
+			writel(data, sfb->regs + SHADOWCON);
+		}
+
 		/* use the blank function to push into power-down */
 		s3c_fb_blank(FB_BLANK_POWERDOWN, win->fbinfo);
 	}
 
-	disable_irq(sfb->irq_no);
+	s3c_fb_enable(sfb, 0);
 
 	if (!sfb->variant.has_clksel)
 		clk_disable(sfb->lcd_clk);
@@ -1655,13 +1679,8 @@ static void s3c_fb_earlysuspend(struct early_suspend *h)
 	s3c_fb_regulator_disable(sfb);
 }
 
-static void s3c_fb_lateresume(struct early_suspend *h)
+static void s3c_fb_do_resume(struct s3c_fb *sfb)
 {
-	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
-	struct s3c_fb_platdata *pd = sfb->pdata;
-	struct s3c_fb_win *win;
-	int win_no;
-
 	s3c_fb_regulator_enable(sfb);
 
 	clk_enable(sfb->bus_clk);
@@ -1669,38 +1688,22 @@ static void s3c_fb_lateresume(struct early_suspend *h)
 	if (!sfb->variant.has_clksel)
 		clk_enable(sfb->lcd_clk);
 
-	/* setup gpio and output polarity controls */
-	pd->setup_gpio();
-	writel(pd->vidcon1, sfb->regs + VIDCON1);
+	s3c_fb_initialize(sfb);
+}
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void s3c_fb_earlysuspend(struct early_suspend *h)
+{
+	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
 
-	/* zero all windows before we do anything */
-	for (win_no = 0; win_no < sfb->variant.nr_windows; win_no++)
-		s3c_fb_clear_win(sfb, win_no);
+	disable_irq(sfb->irq_no);
+	s3c_fb_do_suspend(sfb);
+}
 
-	for (win_no = 0; win_no < sfb->variant.nr_windows - 1; win_no++) {
-		void __iomem *regs = sfb->regs + sfb->variant.keycon;
+static void s3c_fb_lateresume(struct early_suspend *h)
+{
+	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
 
-		regs += (win_no * 8);
-		writel(0xffffff, regs + WKEYCON0);
-		writel(0xffffff, regs + WKEYCON1);
-	}
-
-	/* restore framebuffers */
-	for (win_no = 0; win_no < S3C_FB_MAX_WIN; win_no++) {
-		win = sfb->windows[win_no];
-		if (!win)
-			continue;
-
-		dev_dbg(sfb->dev, "resuming window %d\n", win_no);
-		s3c_fb_blank(FB_BLANK_NORMAL, win->fbinfo);
-		s3c_fb_set_par(win->fbinfo);
-	}
-
-	/* reset irq */
-	clear_bit(S3C_FB_VSYNC_IRQ_EN, &sfb->irq_flags);
-	writel(VIDINTCON1_INT_FIFO | VIDINTCON1_INT_FRAME | VIDINTCON1_INT_I180,
-	       sfb->regs + VIDINTCON1);
-
+	s3c_fb_do_resume(sfb);
 	enable_irq(sfb->irq_no);
 }
 #else
@@ -1708,22 +1711,9 @@ static int s3c_fb_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-	struct s3c_fb_win *win;
-	int win_no;
 
-	for (win_no = S3C_FB_MAX_WIN - 1; win_no >= 0; win_no--) {
-		win = sfb->windows[win_no];
-		if (!win)
-			continue;
+	s3c_fb_do_suspend(sfb);
 
-		/* use the blank function to push into power-down */
-		s3c_fb_blank(FB_BLANK_POWERDOWN, win->fbinfo);
-	}
-
-	if (!sfb->variant.has_clksel)
-		clk_disable(sfb->lcd_clk);
-
-	clk_disable(sfb->bus_clk);
 	return 0;
 }
 
@@ -1731,40 +1721,8 @@ static int s3c_fb_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-	struct s3c_fb_platdata *pd = sfb->pdata;
-	struct s3c_fb_win *win;
-	int win_no;
 
-	clk_enable(sfb->bus_clk);
-
-	if (!sfb->variant.has_clksel)
-		clk_enable(sfb->lcd_clk);
-
-	/* setup gpio and output polarity controls */
-	pd->setup_gpio();
-	writel(pd->vidcon1, sfb->regs + VIDCON1);
-
-	/* zero all windows before we do anything */
-	for (win_no = 0; win_no < sfb->variant.nr_windows; win_no++)
-		s3c_fb_clear_win(sfb, win_no);
-
-	for (win_no = 0; win_no < sfb->variant.nr_windows - 1; win_no++) {
-		void __iomem *regs = sfb->regs + sfb->variant.keycon;
-
-		regs += (win_no * 8);
-		writel(0xffffff, regs + WKEYCON0);
-		writel(0xffffff, regs + WKEYCON1);
-	}
-
-	/* restore framebuffers */
-	for (win_no = 0; win_no < S3C_FB_MAX_WIN; win_no++) {
-		win = sfb->windows[win_no];
-		if (!win)
-			continue;
-
-		dev_dbg(&pdev->dev, "resuming window %d\n", win_no);
-		s3c_fb_set_par(win->fbinfo);
-	}
+	s3c_fb_do_resume(sfb);
 
 	return 0;
 }
@@ -1773,22 +1731,10 @@ static int s3c_fb_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-	struct s3c_fb_win *win;
-	int win_no;
 
-	for (win_no = S3C_FB_MAX_WIN - 1; win_no >= 0; win_no--) {
-		win = sfb->windows[win_no];
-		if (!win)
-			continue;
+	disable_irq(sfb->irq_no);
+	s3c_fb_do_suspend(sfb);
 
-		/* use the blank function to push into power-down */
-		s3c_fb_blank(FB_BLANK_POWERDOWN, win->fbinfo);
-	}
-
-	if (!sfb->variant.has_clksel)
-		clk_disable(sfb->lcd_clk);
-
-	clk_disable(sfb->bus_clk);
 	return 0;
 }
 
@@ -1796,40 +1742,9 @@ static int s3c_fb_runtime_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-	struct s3c_fb_platdata *pd = sfb->pdata;
-	struct s3c_fb_win *win;
-	int win_no;
 
-	clk_enable(sfb->bus_clk);
-
-	if (!sfb->variant.has_clksel)
-		clk_enable(sfb->lcd_clk);
-
-	/* setup gpio and output polarity controls */
-	pd->setup_gpio();
-	writel(pd->vidcon1, sfb->regs + VIDCON1);
-
-	/* zero all windows before we do anything */
-	for (win_no = 0; win_no < sfb->variant.nr_windows; win_no++)
-		s3c_fb_clear_win(sfb, win_no);
-
-	for (win_no = 0; win_no < sfb->variant.nr_windows - 1; win_no++) {
-		void __iomem *regs = sfb->regs + sfb->variant.keycon;
-
-		regs += (win_no * 8);
-		writel(0xffffff, regs + WKEYCON0);
-		writel(0xffffff, regs + WKEYCON1);
-	}
-
-	/* restore framebuffers */
-	for (win_no = 0; win_no < S3C_FB_MAX_WIN; win_no++) {
-		win = sfb->windows[win_no];
-		if (!win)
-			continue;
-
-		dev_dbg(&pdev->dev, "resuming window %d\n", win_no);
-		s3c_fb_set_par(win->fbinfo);
-	}
+	s3c_fb_do_resume(sfb);
+	enable_irq(sfb->irq_no);
 
 	return 0;
 }
@@ -2040,7 +1955,6 @@ static struct s3c_fb_driverdata s3c_fb_data_s5pv210 = {
 		},
 
 		.has_shadowcon	= 1,
-		.has_clksel	= 1,
 	},
 	.win[0]	= &s3c_fb_data_s5p_wins[0],
 	.win[1]	= &s3c_fb_data_s5p_wins[1],
