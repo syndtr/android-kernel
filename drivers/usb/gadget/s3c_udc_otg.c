@@ -310,10 +310,15 @@ static void udc_reinit(struct s3c_udc *dev)
  */
 static int udc_enable(struct s3c_udc *dev)
 {
+	unsigned long flags;
+
 	DEBUG_SETUP("%s: %p\n", __func__, dev);
 
 	otg_phy_init();
+
+	spin_lock_irqsave(&dev->lock, flags);
 	reconfig_usbd();
+	spin_unlock_irqrestore(&dev->lock, flags);
 
 	DEBUG_SETUP("S3C USB 2.0 OTG Controller Core Initialized : 0x%x\n",
 			readl(S3C_UDC_OTG_GINTMSK));
@@ -554,6 +559,7 @@ static void stop_activity(struct s3c_udc *dev,
 
 static void reconfig_usbd(void)
 {
+	struct s3c_udc *dev = the_controller;
 	/* 2. Soft-reset OTG Core and then unreset again. */
 #ifdef DED_TX_FIFO
 	int i;
@@ -580,9 +586,11 @@ static void reconfig_usbd(void)
 	udelay(20);
 
 	/* 4. Make the OTG device core exit from the disconnected state.*/
-	uTemp = readl(S3C_UDC_OTG_DCTL);
-	uTemp = uTemp & ~SOFT_DISCONNECT;
-	writel(uTemp, S3C_UDC_OTG_DCTL);
+	if (!dev->soft_disconnected) {
+		uTemp = readl(S3C_UDC_OTG_DCTL);
+		uTemp = uTemp & ~SOFT_DISCONNECT;
+		writel(uTemp, S3C_UDC_OTG_DCTL);
+	}
 
 	/* 5. Configure OTG Core to initial settings of device mode.*/
 	/* [][1: full speed(30Mhz) 0:high speed]*/
@@ -679,7 +687,7 @@ static int s3c_ep_enable(struct usb_ep *_ep,
 	    || ep->bEndpointAddress != desc->bEndpointAddress
 	    || ep_maxpacket(ep) < le16_to_cpu(desc->wMaxPacketSize)) {
 
-		printk("%s: bad ep or descriptor\n", __func__);
+		DEBUG_UDC("%s: bad ep or descriptor\n", __func__);
 		return -EINVAL;
 	}
 
@@ -688,7 +696,7 @@ static int s3c_ep_enable(struct usb_ep *_ep,
 	    && ep->bmAttributes != USB_ENDPOINT_XFER_BULK
 	    && desc->bmAttributes != USB_ENDPOINT_XFER_INT) {
 
-		printk("%s: %s type mismatch\n", __func__, _ep->name);
+		DEBUG_UDC("%s: %s type mismatch\n", __func__, _ep->name);
 		return -EINVAL;
 	}
 
@@ -697,14 +705,14 @@ static int s3c_ep_enable(struct usb_ep *_ep,
 	     && le16_to_cpu(desc->wMaxPacketSize) != ep_maxpacket(ep))
 	    || !desc->wMaxPacketSize) {
 
-		printk("%s: bad %s maxpacket\n", __func__, _ep->name);
+		DEBUG_UDC("%s: bad %s maxpacket\n", __func__, _ep->name);
 		return -ERANGE;
 	}
 
 	dev = ep->dev;
 	if (!dev->driver || dev->gadget.speed == USB_SPEED_UNKNOWN) {
 
-		printk("%s: bogus device state\n", __func__);
+		DEBUG_UDC("%s: bogus device state\n", __func__);
 		return -ESHUTDOWN;
 	}
 
@@ -720,7 +728,7 @@ static int s3c_ep_enable(struct usb_ep *_ep,
 	s3c_udc_ep_activate(ep);
 	spin_unlock_irqrestore(&ep->dev->lock, flags);
 
-	printk("%s: enabled %s, stopped = %d, maxpacket = %d\n",
+	DEBUG_UDC("%s: enabled %s, stopped = %d, maxpacket = %d\n",
 		__func__, _ep->name, ep->stopped, ep->ep.maxpacket);
 	return 0;
 }
@@ -732,11 +740,11 @@ static int s3c_ep_disable(struct usb_ep *_ep)
 	struct s3c_ep *ep;
 	unsigned long flags;
 
-	printk("%s: %p\n", __func__, _ep);
+	DEBUG_UDC("%s: %p\n", __func__, _ep);
 
 	ep = container_of(_ep, struct s3c_ep, ep);
 	if (!_ep || !ep->desc) {
-		printk("%s: %s not enabled\n", __func__,
+		DEBUG_UDC("%s: %s not enabled\n", __func__,
 		      _ep ? ep->ep.name : NULL);
 		return -EINVAL;
 	}
@@ -751,7 +759,7 @@ static int s3c_ep_disable(struct usb_ep *_ep)
 
 	spin_unlock_irqrestore(&ep->dev->lock, flags);
 
-	printk("%s: disabled %s\n", __func__, _ep->name);
+	DEBUG_UDC("%s: disabled %s\n", __func__, _ep->name);
 	return 0;
 }
 
@@ -910,18 +918,27 @@ wakeup_exit:
 
 void s3c_udc_soft_connect(void)
 {
+	struct s3c_udc *dev = the_controller;
+	unsigned long flags;
 	u32 uTemp;
+
 	DEBUG_UDC("[%s]\n", __func__);
+
+	spin_lock_irqsave(&dev->lock, flags);
+
 	uTemp = readl(S3C_UDC_OTG_DCTL);
 	uTemp = uTemp & ~SOFT_DISCONNECT;
 	writel(uTemp, S3C_UDC_OTG_DCTL);
-	msleep(1);
+	udelay(20);
 
 	reset_available = 1;
 
 	/* Unmask the core interrupt */
 	writel(readl(S3C_UDC_OTG_GINTSTS), S3C_UDC_OTG_GINTSTS);
 	writel(GINTMSK_INIT, S3C_UDC_OTG_GINTMSK);
+
+	dev->soft_disconnected = 0;
+	spin_unlock_irqrestore(&dev->lock, flags);
 }
 
 void s3c_udc_soft_disconnect(void)
@@ -932,6 +949,8 @@ void s3c_udc_soft_disconnect(void)
 
 	DEBUG_UDC("[%s]\n", __func__);
 
+	spin_lock_irqsave(&dev->lock, flags);
+
 	/* Mask the core interrupt */
 	writel(0, S3C_UDC_OTG_GINTMSK);
 
@@ -939,10 +958,10 @@ void s3c_udc_soft_disconnect(void)
 	uTemp |= SOFT_DISCONNECT;
 	writel(uTemp, S3C_UDC_OTG_DCTL);
 
-	spin_lock_irqsave(&dev->lock, flags);
 	stop_activity(dev, dev->driver);
-	spin_unlock_irqrestore(&dev->lock, flags);
 
+	dev->soft_disconnected = 1;
+	spin_unlock_irqrestore(&dev->lock, flags);
 }
 
 static int s3c_udc_pullup(struct usb_gadget *gadget, int is_on)
@@ -1001,7 +1020,7 @@ static struct s3c_udc memory = {
 	/* first group of endpoints */
 	.ep[1] = {
 		  .ep = {
-			 .name = "ep1out-bulk",
+			 .name = "ep1-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1016,7 +1035,7 @@ static struct s3c_udc memory = {
 
 	.ep[2] = {
 		  .ep = {
-			 .name = "ep2in-bulk",
+			 .name = "ep2-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1031,7 +1050,7 @@ static struct s3c_udc memory = {
 
 	.ep[3] = {
 		  .ep = {
-			 .name = "ep3in-int",
+			 .name = "ep3-int",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1045,7 +1064,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[4] = {
 		  .ep = {
-			 .name = "ep4out-bulk",
+			 .name = "ep4-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1059,7 +1078,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[5] = {
 		  .ep = {
-			 .name = "ep5in-bulk",
+			 .name = "ep5-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1073,7 +1092,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[6] = {
 		  .ep = {
-			 .name = "ep6in-int",
+			 .name = "ep6-int",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1087,7 +1106,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[7] = {
 		  .ep = {
-			 .name = "ep7out-bulk",
+			 .name = "ep7-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1101,7 +1120,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[8] = {
 		  .ep = {
-			 .name = "ep8in-bulk",
+			 .name = "ep8-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1115,7 +1134,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[9] = {
 		  .ep = {
-			 .name = "ep9in-int",
+			 .name = "ep9-int",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1129,7 +1148,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[10] = {
 		  .ep = {
-			 .name = "ep10out-bulk",
+			 .name = "ep10-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1143,7 +1162,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[11] = {
 		  .ep = {
-			 .name = "ep11in-bulk",
+			 .name = "ep11-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1157,7 +1176,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[12] = {
 		  .ep = {
-			 .name = "ep12in-int",
+			 .name = "ep12-int",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1171,7 +1190,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[13] = {
 		  .ep = {
-			 .name = "ep13out-bulk",
+			 .name = "ep13-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },
@@ -1185,7 +1204,7 @@ static struct s3c_udc memory = {
 		  },
 	.ep[14] = {
 		  .ep = {
-			 .name = "ep14in-bulk",
+			 .name = "ep14-bulk",
 			 .ops = &s3c_ep_ops,
 			 .maxpacket = EP_FIFO_SIZE,
 			 },

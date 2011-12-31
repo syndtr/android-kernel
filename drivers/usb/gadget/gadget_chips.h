@@ -50,6 +50,11 @@
 #define gadget_is_s3c2410(g)		(!strcmp("s3c2410_udc", (g)->name))
 #define gadget_is_s3c_hsotg(g)		(!strcmp("s3c-hsotg", (g)->name))
 #define gadget_is_s3c_hsudc(g)		(!strcmp("s3c-hsudc", (g)->name))
+#ifdef CONFIG_USB_S3C_UDC_OTG
+#define gadget_is_s3c_udc_otg(g)	(!strcmp("s3c-hsotg", (g)->name))
+#else
+#define gadget_is_s3c_udc_otg(g)	(0)
+#endif
 
 /**
  * usb_gadget_controller_number - support bcdDevice id convention
