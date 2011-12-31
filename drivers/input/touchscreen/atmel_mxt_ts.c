@@ -20,6 +20,7 @@
 #include <linux/input/mt.h>
 #include <linux/interrupt.h>
 #include <linux/slab.h>
+#include <linux/mutex.h>
 #include <linux/workqueue.h>
 #include <linux/earlysuspend.h>
 
@@ -261,6 +262,8 @@ struct mxt_data {
 	unsigned int irq;
 	unsigned int max_x;
 	unsigned int max_y;
+	struct mutex mutex;
+	bool is_started;
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
@@ -651,7 +654,8 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 {
 	struct mxt_data *data = dev_id;
 
-	schedule_work(&data->work);
+	if (data->is_started)
+		schedule_work(&data->work);
 
 	return IRQ_HANDLED;
 }
@@ -851,12 +855,12 @@ static int mxt_initialize(struct mxt_data *data)
 	/* Get object table information */
 	error = mxt_get_object_table(data);
 	if (error)
-		return error;
+		goto error;
 
 	/* Check register init values */
 	error = mxt_check_reg_init(data);
 	if (error)
-		return error;
+		goto error;
 
 	mxt_handle_pdata(data);
 
@@ -874,12 +878,12 @@ static int mxt_initialize(struct mxt_data *data)
 	/* Update matrix size at info struct */
 	error = mxt_read_reg(client, MXT_MATRIX_X_SIZE, &val);
 	if (error)
-		return error;
+		goto error;
 	info->matrix_xsize = val;
 
 	error = mxt_read_reg(client, MXT_MATRIX_Y_SIZE, &val);
 	if (error)
-		return error;
+		goto error;
 	info->matrix_ysize = val;
 
 	dev_info(&client->dev,
@@ -893,6 +897,11 @@ static int mxt_initialize(struct mxt_data *data)
 			info->object_num);
 
 	return 0;
+
+error:
+	kfree(data->object_table);
+	data->object_table = NULL;
+	return error;
 }
 
 static void mxt_calc_resolution(struct mxt_data *data)
@@ -1083,17 +1092,28 @@ static void mxt_onoff(struct mxt_data *data, int onoff)
 static void mxt_start(struct mxt_data *data)
 {
 	/* Touch enable */
+	mutex_lock(&data->mutex);
+	if (data->is_started)
+		return;
 	mxt_write_object(data,
 			MXT_TOUCH_MULTI_T9, MXT_TOUCH_CTRL, 0x83);
 	enable_irq(data->irq);
+	data->is_started = true;
+	mutex_unlock(&data->mutex);
+	schedule_work(&data->work);
 }
 
 static void mxt_stop(struct mxt_data *data)
 {
 	/* Touch disable */
+	mutex_lock(&data->mutex);
+	if (!data->is_started)
+		return;
+	disable_irq_nosync(data->irq);
 	mxt_write_object(data,
 			MXT_TOUCH_MULTI_T9, MXT_TOUCH_CTRL, 0);
-	disable_irq(data->irq);
+	data->is_started = false;
+	mutex_unlock(&data->mutex);
 }
 
 static int mxt_input_open(struct input_dev *dev)
@@ -1121,7 +1141,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	const struct mxt_platform_data *pdata = client->dev.platform_data;
 	struct mxt_data *data;
 	struct input_dev *input_dev;
-	int error;
+	int error, retry;
 
 	if (!pdata)
 		return -EINVAL;
@@ -1133,6 +1153,9 @@ static int __devinit mxt_probe(struct i2c_client *client,
 		error = -ENOMEM;
 		goto err_free_mem;
 	}
+	
+	mutex_init(&data->mutex);
+	mutex_lock(&data->mutex);
 
 	input_dev->name = client->name;
 	input_dev->id.bustype = BUS_I2C;
@@ -1144,6 +1167,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->input_dev = input_dev;
 	data->pdata = pdata;
 	data->irq = client->irq;
+	data->is_started = false;
 
 	mxt_onoff(data, 1);
 
@@ -1175,9 +1199,15 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	input_set_drvdata(input_dev, data);
 	i2c_set_clientdata(client, data);
 
-	error = mxt_initialize(data);
+	error = 0;
+	retry = 10;
+	do {
+		if (error)
+			msleep(200);
+		error = mxt_initialize(data);
+	} while(error && retry--);
 	if (error)
-		goto err_free_object;
+		goto err_mxt_off;
 
 	INIT_WORK(&data->work, mxt_work);
 	
@@ -1208,6 +1238,7 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	data->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
 	register_early_suspend(&data->early_suspend);
 #endif
+	mutex_unlock(&data->mutex);
 	return 0;
 
 err_unregister_device:
@@ -1217,8 +1248,10 @@ err_free_irq:
 	free_irq(client->irq, data);
 err_free_object:
 	kfree(data->object_table);
-err_free_mem:
+err_mxt_off:
 	mxt_onoff(data, 0);
+	mutex_unlock(&data->mutex);
+err_free_mem:
 	input_free_device(input_dev);
 	kfree(data);
 	return error;
@@ -1262,12 +1295,17 @@ static void mxt_lateresume(struct early_suspend *h)
 {
 	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
 	struct input_dev *input_dev = data->input_dev;
+	int ret = 0, retry = 10;
 
 	mxt_onoff(data, 1);
 
 	/* Soft reset */
-	mxt_write_object(data, MXT_GEN_COMMAND_T6,
-			MXT_COMMAND_RESET, 1);
+	do {
+		if (ret)
+			msleep(200);
+		ret = mxt_write_object(data, MXT_GEN_COMMAND_T6,
+				MXT_COMMAND_RESET, 1);
+	} while(ret && retry--);
 
 	msleep(MXT_RESET_TIME);
 
@@ -1300,10 +1338,15 @@ static int mxt_resume(struct device *dev)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
 	struct input_dev *input_dev = data->input_dev;
+	int ret = 0, retry = 10;
 
 	/* Soft reset */
-	mxt_write_object(data, MXT_GEN_COMMAND_T6,
-			MXT_COMMAND_RESET, 1);
+	do {
+		if (ret)
+			msleep(200);
+		ret = mxt_write_object(data, MXT_GEN_COMMAND_T6,
+				MXT_COMMAND_RESET, 1);
+	} while(ret && retry--);
 
 	msleep(MXT_RESET_TIME);
 
