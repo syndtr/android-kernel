@@ -6,7 +6,7 @@ config PVR_SGX
 	  Enable this option to build support for the PowerVR SGX 3D core.
 
 	  To compile this driver as a module, choose M here:
-	  this will generate two modules, called pvrsrvkm and s3c_fb.
+	  this will generate two modules, called pvrsrvkm and s3clfb.
 
 choice
 	prompt "PowerVR SGX core"
