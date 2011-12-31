@@ -89,6 +89,7 @@ pvrsrvkm-y := \
 	bridged_pvr_bridge.o \
 	perproc.o \
 	lists.o \
+	refcount.o \
 	s5pc110/sysconfig.o \
 	s5pc110/sysutils.o \
 	sgx/bridged_sgx_bridge.o \
