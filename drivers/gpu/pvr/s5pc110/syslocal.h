@@ -75,8 +75,9 @@
 extern "C" {
 #endif
 
- 
- 
+IMG_VOID CPUFreqRegister(IMG_VOID);
+IMG_VOID CPUFreqDeregister(IMG_VOID);
+
 IMG_VOID DisableSystemClocks(SYS_DATA *psSysData);
 PVRSRV_ERROR EnableSystemClocks(SYS_DATA *psSysData);
 

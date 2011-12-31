@@ -493,7 +493,7 @@ PVRSRV_ERROR SysFinalise(IMG_VOID)
 #endif
 
 #if defined(SUPPORT_ACTIVE_POWER_MANAGEMENT)
-	
+	//CPUFreqRegister();
 	DisableSGXClocks(gpsSysData);
 #endif	
 
@@ -544,13 +544,15 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 	{
 #if defined(SUPPORT_ACTIVE_POWER_MANAGEMENT)
 		PVR_ASSERT(SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS));
-		
+
 		eError = EnableSGXClocksWrap(gpsSysData);
 		if (eError != PVRSRV_OK)
 		{
 			PVR_DPF((PVR_DBG_ERROR,"SysDeinitialise: EnableSGXClocks failed"));
 			return eError;
 		}
+
+		//CPUFreqDeregister();
 #endif	
 
 		
