@@ -292,6 +292,12 @@ config SAMSUNG_PM_DEBUG
 	  Resume code. See <file:Documentation/arm/Samsung-S3C24XX/Suspend.txt>
 	  for more information.
 
+config SAMSUNG_PM_DEBUG_LL
+	bool "S3C2410 PM Suspend low-level debug"
+	depends on SAMSUNG_PM_DEBUG && DEBUG_LL
+	help
+	  S3C2410 PM Suspend debugging using low-level debugging functions.
+
 config S3C_PM_DEBUG_LED_SMDK
        bool "SMDK LED suspend/resume debugging"
        depends on PM && (MACH_SMDK6410)

@@ -115,6 +115,7 @@ extern struct syscore_ops s3c24xx_irq_syscore_ops;
 /* PM debug functions */
 
 #ifdef CONFIG_SAMSUNG_PM_DEBUG
+#ifdef CONFIG_SAMSUNG_PM_DEBUG_LL
 /**
  * s3c_pm_dbg() - low level debug function for use in suspend/resume.
  * @msg: The message to print.
@@ -128,6 +129,9 @@ extern void s3c_pm_dbg(const char *msg, ...);
 #define S3C_PMDBG(fmt...) s3c_pm_dbg(fmt)
 #else
 #define S3C_PMDBG(fmt...) printk(KERN_DEBUG fmt)
+#endif
+#else
+#define S3C_PMDBG(fmt...)
 #endif
 
 #ifdef CONFIG_S3C_PM_DEBUG_LED_SMDK

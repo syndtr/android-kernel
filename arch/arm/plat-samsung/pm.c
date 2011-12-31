@@ -42,7 +42,7 @@ unsigned long s3c_pm_flags;
  * resume before the console layer is available.
 */
 
-#ifdef CONFIG_SAMSUNG_PM_DEBUG
+#ifdef CONFIG_SAMSUNG_PM_DEBUG_LL 
 extern void printascii(const char *);
 
 void s3c_pm_dbg(const char *fmt, ...)
