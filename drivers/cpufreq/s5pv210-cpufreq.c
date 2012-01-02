@@ -478,8 +478,9 @@ static int s5pv210_target(struct cpufreq_policy *policy,
 				arm_volt, arm_volt_max);
 	}
 
+#ifdef DEBUG
 	printk(KERN_DEBUG "Perf changed[L%d]\n", index);
-
+#endif
 exit:
 	mutex_unlock(&set_freq_lock);
 	return ret;
