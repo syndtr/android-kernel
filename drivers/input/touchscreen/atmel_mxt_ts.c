@@ -264,6 +264,7 @@ struct mxt_data {
 	unsigned int max_y;
 	struct mutex mutex;
 	bool is_started;
+	atomic_t refcnt;
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	struct early_suspend early_suspend;
 #endif
@@ -1121,6 +1122,7 @@ static int mxt_input_open(struct input_dev *dev)
 	struct mxt_data *data = input_get_drvdata(dev);
 
 	mxt_start(data);
+	atomic_inc(&data->refcnt);
 
 	return 0;
 }
@@ -1129,7 +1131,8 @@ static void mxt_input_close(struct input_dev *dev)
 {
 	struct mxt_data *data = input_get_drvdata(dev);
 
-	mxt_stop(data);
+	if (atomic_dec_and_test(&data->refcnt))
+		mxt_stop(data);
 }
 
 static void mxt_earlysuspend(struct early_suspend *h);
@@ -1279,14 +1282,8 @@ static int __devexit mxt_remove(struct i2c_client *client)
 static void mxt_earlysuspend(struct early_suspend *h)
 {
 	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
-	struct input_dev *input_dev = data->input_dev;
 
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
-		mxt_stop(data);
-
-	mutex_unlock(&input_dev->mutex);
+	mxt_stop(data);
 
 	mxt_onoff(data, 0);
 }
@@ -1294,7 +1291,6 @@ static void mxt_earlysuspend(struct early_suspend *h)
 static void mxt_lateresume(struct early_suspend *h)
 {
 	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
-	struct input_dev *input_dev = data->input_dev;
 	int ret = 0, retry = 10;
 
 	mxt_onoff(data, 1);
@@ -1309,26 +1305,16 @@ static void mxt_lateresume(struct early_suspend *h)
 
 	msleep(MXT_RESET_TIME);
 
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
+	if (atomic_read(&data->refcnt) > 0)
 		mxt_start(data);
-
-	mutex_unlock(&input_dev->mutex);
 }
 #else
 static int mxt_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
-	struct input_dev *input_dev = data->input_dev;
 
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
-		mxt_stop(data);
-
-	mutex_unlock(&input_dev->mutex);
+	mxt_stop(data);
 
 	return 0;
 }
@@ -1337,7 +1323,6 @@ static int mxt_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct mxt_data *data = i2c_get_clientdata(client);
-	struct input_dev *input_dev = data->input_dev;
 	int ret = 0, retry = 10;
 
 	/* Soft reset */
@@ -1350,12 +1335,8 @@ static int mxt_resume(struct device *dev)
 
 	msleep(MXT_RESET_TIME);
 
-	mutex_lock(&input_dev->mutex);
-
-	if (input_dev->users)
+	if (atomic_read(&data->refcnt) > 0)
 		mxt_start(data);
-
-	mutex_unlock(&input_dev->mutex);
 
 	return 0;
 }
