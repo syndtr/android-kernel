@@ -52,3 +52,5 @@ obj-$(CONFIG_INPUT_WM831X_ON)		+= wm831x-on.o
 obj-$(CONFIG_INPUT_XEN_KBDDEV_FRONTEND)	+= xen-kbdfront.o
 obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_KR3DH)		+= kr3dh.o
+obj-$(CONFIG_INPUT_YAS529)		+= yas529.o
+obj-$(CONFIG_INPUT_ORIENTATION)		+= orientation.o

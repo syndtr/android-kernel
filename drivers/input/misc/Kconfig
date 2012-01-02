@@ -569,4 +569,38 @@ config INPUT_KR3DH_POSITION
 	    6: bottom, lower-right
 	    7: bottom, lower-left
 
+config INPUT_YAS529
+	tristate "Yamaha YAS529 Geomagnetic Sensor"
+	depends on I2C
+	help
+	  Say Y here if you want to use Yamaha YAS529 Geomagnetic
+	  Sensor through I2C interface.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called yas529.
+
+
+config INPUT_YAS529_POSITION
+	int "YAS529 Mounting Position on Board"
+	depends on INPUT_YAS529
+	default "1"
+	help
+	  Chip mounting position (pin 1).
+	    0: top, upper-left
+	    1: top, upper-right
+	    2: top, lower-right
+	    3: top, lower-left
+	    4: bottom, upper-left
+	    5: bottom, upper-right
+	    6: bottom, lower-right
+	    7: bottom, lower-left
+
+config INPUT_ORIENTATION
+	tristate "Yamaha Orientation Sensor"
+	help
+	  Say Y here if you want to use Yamaha Orientation Sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called orientation
+
 endif
