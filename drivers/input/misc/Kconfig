@@ -544,4 +544,29 @@ config INPUT_XEN_KBDDEV_FRONTEND
 	  To compile this driver as a module, choose M here: the
 	  module will be called xen-kbdfront.
 
+config INPUT_KR3DH
+	tristate "STMicro KR3DH Accelerometer Sensor"
+	depends on I2C
+	help
+	  Say Y here if you want to use STMicro KR3DH Accelerometer
+	  through I2C interface.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called kr3dh
+
+config INPUT_KR3DH_POSITION
+	int "KR3DH Mounting Position on Board"
+	depends on INPUT_KR3DH
+	default "0"
+	help
+	  Chip mounting position (pin 1).
+	    0: top, upper-left
+	    1: top, upper-right
+	    2: top, lower-right
+	    3: top, lower-left
+	    4: bottom, upper-left
+	    5: bottom, upper-right
+	    6: bottom, lower-right
+	    7: bottom, lower-left
+
 endif
