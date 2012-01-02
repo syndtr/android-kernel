@@ -24,6 +24,7 @@
 
 #include <plat/devs.h>
 #include <plat/iic.h>
+#include <plat/regs-iic.h>
 #include <plat/gpio-cfg.h>
 
 #include <mach/qss.h>
@@ -111,7 +112,7 @@ static struct s3c2410_platform_i2c i2c2_pdata = {
 	.bus_num	= 2,
 	.slave_addr	= 0x10,
 	.frequency	= 400 * 1000,
-	.sda_delay	= 100,
+	.sda_delay	= S3C2410_IICLC_SDA_DELAY5 | S3C2410_IICLC_FILTER_ON,
 	.cfg_gpio	= s3c_i2c2_cfg_gpio,
 };
 
@@ -138,6 +139,20 @@ static void __init qss_tsp_cfg_gpio(void)
 	else
 		i2c2_devs[0].irq = ret;
 
+}
+
+/* kr3dh accelerometer */
+
+static struct i2c_board_info i2c5_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("kr3dh", 0x19),
+	},
+};
+
+static void __init qss_kr3dh_cfg_gpio(void)
+{
+	/* i2c gpio cfg */
+	s3c_i2c5_cfg_gpio(&s3c_device_i2c5);
 }
 
 /* Touchkey */
@@ -191,10 +206,26 @@ static void __init qss_touchkey_cfg_gpio(void)
 		i2c10_devs[0].irq = ret;
 }
 
+/* yas529 geomagnetic sensor */
+
+static struct i2c_board_info i2c12_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("yas529", 0x2e),
+	},
+};
+
+static void __init qss_yas529_cfg_gpio(void)
+{
+	/* i2c gpio cfg */
+	s3c_i2c12_cfg_gpio(&s3c_device_i2c12);
+}
+
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_keypad,
 	&s3c_device_i2c2,
+	&s3c_device_i2c5,
 	&s3c_device_i2c10,
+	&s3c_device_i2c12,
 };
 
 void __init qss_input_init(void)
@@ -202,7 +233,9 @@ void __init qss_input_init(void)
 	/* gpio cfg */
 	qss_keypad_cfg_gpio();
 	qss_tsp_cfg_gpio();
+	qss_kr3dh_cfg_gpio();
 	qss_touchkey_cfg_gpio();
+	qss_yas529_cfg_gpio();
 
 	/* i2c platdata */
 	s3c_i2c2_set_platdata(&i2c2_pdata);
@@ -213,6 +246,12 @@ void __init qss_input_init(void)
 	/* tsp */
 	i2c_register_board_info(2, i2c2_devs, ARRAY_SIZE(i2c2_devs));
 
+	/* kr3dh */
+	i2c_register_board_info(5, i2c5_devs, ARRAY_SIZE(i2c5_devs));
+
 	/* touchkey */
 	i2c_register_board_info(10, i2c10_devs, ARRAY_SIZE(i2c10_devs));
+
+	/* yas529 */
+	i2c_register_board_info(12, i2c12_devs, ARRAY_SIZE(i2c12_devs));
 }
