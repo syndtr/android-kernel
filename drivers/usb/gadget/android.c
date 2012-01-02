@@ -589,10 +589,9 @@ static ssize_t mass_storage_inquiry_store(struct device *dev,
 {
 	struct android_usb_function *f = dev_get_drvdata(dev);
 	struct mass_storage_function_config *config = f->config;
-	if (size >= sizeof(config->common->inquiry_string))
+	if (size != sizeof(config->common->inquiry_string) - 1)
 		return -EINVAL;
-	if (sscanf(buf, "%s", config->common->inquiry_string) != 1)
-		return -EINVAL;
+	strncpy(config->common->inquiry_string, buf, size);
 	return size;
 }
 
