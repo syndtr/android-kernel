@@ -34,8 +34,25 @@ static struct i2c_board_info i2c7_devs[] __initdata = {
 	},
 };
 
+static struct gpio_switch_platform_data uart_switch_pdata = {
+	.name		= "uart",
+	.gpio		= GPIO_UART_SEL,
+	.direction	= SWITCH_GPIO_OUTPUT,
+	.value		= 1,
+};
+
+static struct platform_device qss_device_uart_switch = {
+	.name		= "switch-gpio",
+	.id		= -1,
+	.dev	= {
+		.platform_data	= &uart_switch_pdata,
+	},
+};
+
 static void __init qss_switch_cfg_gpio(void)
 {
+	s3c_i2c7_cfg_gpio(&s3c_device_i2c7);
+
 	s3c_gpio_cfgrange_nopull(GPIO_USB_SEL, 1, S3C_GPIO_OUTPUT);
 
 	s3c_gpio_cfgrange_nopull(GPIO_UART_SEL, 1, S3C_GPIO_OUTPUT);
@@ -45,16 +62,18 @@ static void __init qss_switch_cfg_gpio(void)
 	i2c7_devs[0].irq = gpio_to_irq(GPIO_SWITCH_INT);
 }
 
+static struct platform_device *qss_devices[] __initdata = {
+	&s3c_device_i2c7,
+	&qss_device_uart_switch,
+};
+
 void __init qss_switch_init(void)
 {
-	/* i2c gpio cfg */
-	s3c_i2c6_cfg_gpio(&s3c_device_i2c7);
-
-	/* register device */
-	platform_device_register(&s3c_device_i2c7);
-
 	/* switch gpio config */
 	qss_switch_cfg_gpio();
+
+	/* register devices */
+	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
 
 	/* register fsa9480 */
 	i2c_register_board_info(7, i2c7_devs, ARRAY_SIZE(i2c7_devs));
