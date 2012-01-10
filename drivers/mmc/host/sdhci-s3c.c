@@ -46,6 +46,7 @@ struct sdhci_s3c {
 	struct resource		*ioarea;
 	struct s3c_sdhci_platdata *pdata;
 	unsigned int		cur_clk;
+	bool			cur_clk_set;
 	int			ext_cd_irq;
 	int			ext_cd_gpio;
 
@@ -80,7 +81,7 @@ static void sdhci_s3c_check_sclk(struct sdhci_host *host)
 
 		tmp &= ~S3C_SDHCI_CTRL2_SELBASECLK_MASK;
 		tmp |= ourhost->cur_clk << S3C_SDHCI_CTRL2_SELBASECLK_SHIFT;
-		writel(tmp, host->ioaddr + 0x80);
+		writel(tmp, host->ioaddr + S3C_SDHCI_CONTROL2);
 	}
 }
 
@@ -112,6 +113,59 @@ static unsigned int sdhci_s3c_get_max_clk(struct sdhci_host *host)
 	}
 
 	return max;
+}
+
+static void sdhci_s3c_set_ios(struct sdhci_host *host,
+			      struct mmc_ios *ios)
+{
+	struct sdhci_s3c *ourhost = to_s3c(host);
+	struct s3c_sdhci_platdata *pdata = ourhost->pdata;
+	int width;
+	u32 ctrl;
+
+	sdhci_s3c_check_sclk(host);
+
+	if (ios->power_mode != MMC_POWER_OFF) {
+		switch (ios->bus_width) {
+		case MMC_BUS_WIDTH_8:
+			width = 8;
+			break;
+		case MMC_BUS_WIDTH_4:
+			width = 4;
+			break;
+		case MMC_BUS_WIDTH_1:
+			width = 1;
+			break;
+		default:
+			BUG();
+		}
+
+		if (pdata->cfg_gpio)
+			pdata->cfg_gpio(ourhost->pdev, width);
+	}
+
+	if (pdata->cfg_card)
+		pdata->cfg_card(ourhost->pdev, host->ioaddr,
+				ios, host->mmc->card);
+	else {
+		/* reprogram default hardware configuration */
+		writel(S3C64XX_SDHCI_CONTROL4_DRIVE_9mA,
+			host->ioaddr + S3C64XX_SDHCI_CONTROL4);
+
+		ctrl = readl(host->ioaddr + S3C_SDHCI_CONTROL2);
+		ctrl |= (S3C64XX_SDHCI_CTRL2_ENSTAASYNCCLR |
+			  S3C64XX_SDHCI_CTRL2_ENCMDCNFMSK |
+			  S3C_SDHCI_CTRL2_ENFBCLKRX |
+			  S3C_SDHCI_CTRL2_DFCNT_NONE |
+			  S3C_SDHCI_CTRL2_ENCLKOUTHOLD);
+		writel(ctrl, host->ioaddr + S3C_SDHCI_CONTROL2);
+
+		/* reconfigure the controller for new clock rate */
+		ctrl = (S3C_SDHCI_CTRL3_FCSEL1 | S3C_SDHCI_CTRL3_FCSEL0);
+		if (ios->clock < 25 * 1000000)
+			ctrl |= (S3C_SDHCI_CTRL3_FCSEL3 | S3C_SDHCI_CTRL3_FCSEL2);
+		writel(ctrl, host->ioaddr + S3C_SDHCI_CONTROL3);
+	}
 }
 
 /**
@@ -188,13 +242,14 @@ static void sdhci_s3c_set_clock(struct sdhci_host *host, unsigned int clock)
 
 	/* select the new clock source */
 
-	if (ourhost->cur_clk != best_src) {
+	if (ourhost->cur_clk != best_src || !ourhost->cur_clk_set) {
 		struct clk *clk = ourhost->clk_bus[best_src];
 
 		/* turn clock off to card before changing clock source */
 		writew(0, host->ioaddr + SDHCI_CLOCK_CONTROL);
 
 		ourhost->cur_clk = best_src;
+		ourhost->cur_clk_set = true;
 		host->max_clk = clk_get_rate(clk);
 
 		ctrl = readl(host->ioaddr + S3C_SDHCI_CONTROL2);
@@ -202,24 +257,6 @@ static void sdhci_s3c_set_clock(struct sdhci_host *host, unsigned int clock)
 		ctrl |= best_src << S3C_SDHCI_CTRL2_SELBASECLK_SHIFT;
 		writel(ctrl, host->ioaddr + S3C_SDHCI_CONTROL2);
 	}
-
-	/* reprogram default hardware configuration */
-	writel(S3C64XX_SDHCI_CONTROL4_DRIVE_9mA,
-		host->ioaddr + S3C64XX_SDHCI_CONTROL4);
-
-	ctrl = readl(host->ioaddr + S3C_SDHCI_CONTROL2);
-	ctrl |= (S3C64XX_SDHCI_CTRL2_ENSTAASYNCCLR |
-		  S3C64XX_SDHCI_CTRL2_ENCMDCNFMSK |
-		  S3C_SDHCI_CTRL2_ENFBCLKRX |
-		  S3C_SDHCI_CTRL2_DFCNT_NONE |
-		  S3C_SDHCI_CTRL2_ENCLKOUTHOLD);
-	writel(ctrl, host->ioaddr + S3C_SDHCI_CONTROL2);
-
-	/* reconfigure the controller for new clock rate */
-	ctrl = (S3C_SDHCI_CTRL3_FCSEL1 | S3C_SDHCI_CTRL3_FCSEL0);
-	if (clock < 25 * 1000000)
-		ctrl |= (S3C_SDHCI_CTRL3_FCSEL3 | S3C_SDHCI_CTRL3_FCSEL2);
-	writel(ctrl, host->ioaddr + S3C_SDHCI_CONTROL3);
 }
 
 /**
@@ -323,6 +360,7 @@ static struct sdhci_ops sdhci_s3c_ops = {
 	.set_clock		= sdhci_s3c_set_clock,
 	.get_min_clock		= sdhci_s3c_get_min_clock,
 	.platform_8bit_width	= sdhci_s3c_platform_8bit_width,
+	.set_ios		= sdhci_s3c_set_ios,
 };
 
 static void sdhci_s3c_notify_change(struct platform_device *dev, int state)
@@ -532,7 +570,8 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 
 	if (pdata->card_is_builtin) {
 		/* Keep power for built-in card */
-		host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
+		host->mmc->pm_caps = MMC_PM_KEEP_POWER;
+		host->mmc->pm_flags = MMC_PM_KEEP_POWER;
 
 		/* Provide invalid timeout value if card is built-in */
 		host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
@@ -609,7 +648,7 @@ static int __devexit sdhci_s3c_remove(struct platform_device *pdev)
 
 	sdhci_remove_host(host, 1);
 
-	for (ptr = 0; ptr < 3; ptr++) {
+	for (ptr = 0; ptr < MAX_BUS_CLK; ptr++) {
 		if (sc->clk_bus[ptr]) {
 			clk_disable(sc->clk_bus[ptr]);
 			clk_put(sc->clk_bus[ptr]);
