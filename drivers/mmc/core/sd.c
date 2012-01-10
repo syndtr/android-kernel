@@ -921,6 +921,7 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 
 		card->type = MMC_TYPE_SD;
 		memcpy(card->raw_cid, cid, sizeof(card->raw_cid));
+		host->card = card;
 	}
 
 	/*
@@ -996,12 +997,13 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		}
 	}
 
-	host->card = card;
 	return 0;
 
 free_card:
-	if (!oldcard)
+	if (!oldcard) {
 		mmc_remove_card(card);
+		host->card = NULL;
+	}
 
 	return err;
 }

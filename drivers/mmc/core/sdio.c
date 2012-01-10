@@ -469,7 +469,9 @@ static int mmc_sdio_init_card(struct mmc_host *host, u32 ocr,
 			return -ENOENT;
 
 		card = oldcard;
-	}
+	} else
+		host->card = card;
+
 	mmc_fixup_device(card, NULL);
 
 	if (card->type == MMC_TYPE_SD_COMBO) {
@@ -521,8 +523,10 @@ finish:
 	return 0;
 
 remove:
-	if (!oldcard)
+	if (!oldcard) {
 		mmc_remove_card(card);
+		host->card = NULL;
+	}
 
 err:
 	return err;
