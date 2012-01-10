@@ -246,7 +246,7 @@ static struct switch_attr attrs[] = {
 		.states_nr	= ARRAY_SIZE(states_mansw),
 		.get_state	= fsa9480_mansw_get_state,
 		.set_state	= fsa9480_mansw_set_state,
-		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_WRITEABLE |
+		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_WRITABLE |
 				  SWITCH_ATTR_IGNSTATE,
 	},
 	[FSA9480_SWITCH_USB] = {

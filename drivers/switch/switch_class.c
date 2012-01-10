@@ -150,7 +150,7 @@ static int _switch_set_state(struct switch_attr *attr, unsigned state)
 		return -EINVAL;
 
 	if (attr->state != state || attr->flags & SWITCH_ATTR_IGNSTATE) {
-		attr->state = state;
+		attr->newstate = state;
 		schedule_work(&attr->wq);
 	}
 
@@ -168,11 +168,15 @@ static void _switch_set_state_wq(struct work_struct *work)
 	int env_offset = 0;
 	char *prop_buf;
 	int length = -1;
-	int ret;
 
-	if (attr->set_state) {
-		ret = attr->set_state(sdev, attr, attr->state);
-	}
+	if (attr->state == attr->newstate)
+		return;
+
+	if (attr->set_state)
+		if (attr->set_state(sdev, attr, attr->newstate))
+			return;
+
+	attr->state = attr->newstate;
 
 	handler_exec(attr->handlers, attr->state);
 
@@ -371,10 +375,19 @@ out:
 static void switch_attrs_register(unsigned i, struct switch_dev *sdev,
 				  struct switch_attr *attr,
 				  struct switch_handler_head *hdlhead) {
-	struct device_attribute *dev_attr = &attr->dev_attr;
+	struct device_attribute *dev_attr;
 	int ret;
 
 	attr->sdev = sdev;
+
+	dev_attr = kzalloc(sizeof(struct device_attribute), GFP_KERNEL);
+	if (dev_attr == NULL) {
+		printk(KERN_ERR "switch: %s: unable to register attr '%s': -ENOMEM\n",
+		       sdev->name, attr->name);
+		return;
+	}
+
+	attr->dev_attr = dev_attr;
 
 	dev_attr->attr.name = attr->name;
 	dev_attr->attr.mode = S_IRUGO | S_IWUSR;
@@ -382,7 +395,7 @@ static void switch_attrs_register(unsigned i, struct switch_dev *sdev,
 	if (attr->flags & SWITCH_ATTR_READABLE)
 		dev_attr->show = switch_show;
 
-	if (attr->flags & SWITCH_ATTR_WRITEABLE)
+	if (attr->flags & SWITCH_ATTR_WRITABLE)
 		dev_attr->store = switch_store;
 
 	ret = device_create_file(sdev->dev, dev_attr);
@@ -397,7 +410,11 @@ static void switch_attrs_register(unsigned i, struct switch_dev *sdev,
 }
 
 static void switch_attrs_unregister(struct switch_dev *sdev, struct switch_attr *attr) {
-	device_remove_file(sdev->dev, &attr->dev_attr);
+	if (attr->dev_attr) {
+		device_remove_file(sdev->dev, attr->dev_attr);
+		kfree(attr->dev_attr);
+		attr->dev_attr = NULL;
+	}
 }
 
 int switch_dev_register(struct switch_dev *sdev)

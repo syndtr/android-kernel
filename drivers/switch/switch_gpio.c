@@ -23,50 +23,34 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/switch.h>
-#include <linux/workqueue.h>
 #include <linux/gpio.h>
 
 struct gpio_switch_data {
 	struct switch_dev sdev;
-	unsigned gpio;
-	const char *name_on;
-	const char *name_off;
+	struct gpio_switch_platform_data *pdata;
 	int irq;
-	struct work_struct work;
+	const char *states[2];
+	struct switch_attr attrs[1];
 };
-
-static const char *states[] = {
-	"0",
-	"1",
-};
-
-static struct switch_attr attrs[] = {
-	{
-		.name		= "state",
-		.states		= states,
-		.states_nr	= ARRAY_SIZE(states),
-		.state		= 0,
-		.flags		= SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT,
-	},
-};
-
-static void gpio_switch_work(struct work_struct *work)
-{
-	int state;
-	struct gpio_switch_data	*data =
-		container_of(work, struct gpio_switch_data, work);
-
-	state = gpio_get_value(data->gpio);
-	switch_set_state(&data->sdev, 0, state);
-}
 
 static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
 {
 	struct gpio_switch_data *switch_data =
 		(struct gpio_switch_data *)dev_id;
+	int state;
 
-	schedule_work(&switch_data->work);
+	state = gpio_get_value(switch_data->pdata->gpio);
+	switch_set_state(&switch_data->sdev, 0, state);
 	return IRQ_HANDLED;
+}
+
+static int gpio_set_state(struct switch_dev *sdev, struct switch_attr *attr, unsigned state)
+{
+	struct gpio_switch_data *switch_data =
+		container_of(sdev, struct gpio_switch_data, sdev);
+
+	gpio_set_value(switch_data->pdata->gpio, state);
+	return 0;
 }
 
 ssize_t	print_name(struct switch_dev *sdev, char *buf)
@@ -79,13 +63,13 @@ ssize_t	print_name(struct switch_dev *sdev, char *buf)
 		return -EINVAL;
 
 	if (ret)
-		if (switch_data->name_on)
-			return sprintf(buf, "%s", switch_data->name_on);
+		if (switch_data->pdata->name_on)
+			return sprintf(buf, "%s", switch_data->pdata->name_on);
 		else
 			return -1;
 	else
-		if (switch_data->name_off)
-			return sprintf(buf, "%s", switch_data->name_off);
+		if (switch_data->pdata->name_off)
+			return sprintf(buf, "%s", switch_data->pdata->name_off);
 		else
 			return -1;
 }
@@ -94,6 +78,7 @@ static int gpio_switch_probe(struct platform_device *pdev)
 {
 	struct gpio_switch_platform_data *pdata = pdev->dev.platform_data;
 	struct gpio_switch_data *switch_data;
+	struct switch_attr *attr;
 	int ret = 0;
 
 	if (!pdata)
@@ -103,58 +88,63 @@ static int gpio_switch_probe(struct platform_device *pdev)
 	if (!switch_data)
 		return -ENOMEM;
 
-	switch_data->sdev.name = pdata->name;
-	switch_data->sdev.attrs = attrs;
-	switch_data->sdev.attrs_nr = ARRAY_SIZE(attrs);
-	switch_data->gpio = pdata->gpio;
-
-	switch_data->name_on = pdata->name_on;
-	switch_data->name_off = pdata->name_off;
-	if (pdata->name_on || pdata->name_off)
-		switch_data->sdev.print_name = print_name;
+	attr = &(switch_data->attrs[0]);
+	attr->name = "state";
+	attr->states = switch_data->states;
+	attr->states_nr = ARRAY_SIZE(switch_data->states);
+	attr->state = pdata->value;
+	attr->flags = SWITCH_ATTR_READABLE | SWITCH_ATTR_UEVENT;
 
 	if (pdata->state_on)
-		states[1] = pdata->state_on;
+		attr->states[1] = pdata->state_on;
+	else
+		attr->states[1] = "1";
 	if (pdata->state_off)
-		states[0] = pdata->state_off;
+		attr->states[0] = pdata->state_off;
+	else
+		attr->states[0] = "0";
+
+	switch_data->sdev.name = pdata->name;
+	switch_data->sdev.attrs = switch_data->attrs;
+	switch_data->sdev.attrs_nr = ARRAY_SIZE(switch_data->attrs);
+
+	switch_data->pdata = pdata;
+	if (pdata->name_on || pdata->name_off)
+		switch_data->sdev.print_name = print_name;
+	
+	ret = gpio_request(pdata->gpio, pdev->name);
+	if (ret < 0)
+		goto err_kfree;
+
+	if (pdata->direction == SWITCH_GPIO_OUTPUT) {
+		attr->flags |= SWITCH_ATTR_WRITABLE;
+		attr->set_state = gpio_set_state;
+		gpio_direction_output(pdata->gpio, attr->state);
+	}
 
 	ret = switch_dev_register(&switch_data->sdev);
 	if (ret < 0)
-		goto err_switch_dev_register;
+		goto err_kfree;
 
-	ret = gpio_request(switch_data->gpio, pdev->name);
-	if (ret < 0)
-		goto err_request_gpio;
-
-	ret = gpio_direction_input(switch_data->gpio);
-	if (ret < 0)
-		goto err_set_gpio_input;
-
-	INIT_WORK(&switch_data->work, gpio_switch_work);
-
-	switch_data->irq = gpio_to_irq(switch_data->gpio);
-	if (switch_data->irq < 0) {
-		ret = switch_data->irq;
-		goto err_detect_irq_num_failed;
+	if (pdata->direction == SWITCH_GPIO_INPUT) {
+		gpio_direction_input(pdata->gpio);
+		switch_set_state(&switch_data->sdev, 0, gpio_get_value(pdata->gpio));
+		switch_data->irq = gpio_to_irq(pdata->gpio);
+		if (switch_data->irq >= 0) {
+			ret = request_irq(switch_data->irq, gpio_irq_handler,
+					  IRQF_TRIGGER_LOW, pdev->name, switch_data);
+			if (ret < 0) {
+				dev_err(&pdev->dev, "unable to request IRQ%d for GPIO%d (%d)\n",
+					switch_data->irq, pdata->gpio, ret);
+				switch_data->irq = -1;
+				ret = 0;
+			}
+		}
 	}
-
-	ret = request_irq(switch_data->irq, gpio_irq_handler,
-			  IRQF_TRIGGER_LOW, pdev->name, switch_data);
-	if (ret < 0)
-		goto err_request_irq;
-
-	/* Perform initial detection */
-	gpio_switch_work(&switch_data->work);
 
 	return 0;
 
-err_request_irq:
-err_detect_irq_num_failed:
-err_set_gpio_input:
-	gpio_free(switch_data->gpio);
-err_request_gpio:
-	switch_dev_unregister(&switch_data->sdev);
-err_switch_dev_register:
+err_kfree:
 	kfree(switch_data);
 
 	return ret;
@@ -164,8 +154,9 @@ static int __devexit gpio_switch_remove(struct platform_device *pdev)
 {
 	struct gpio_switch_data *switch_data = platform_get_drvdata(pdev);
 
-	cancel_work_sync(&switch_data->work);
-	gpio_free(switch_data->gpio);
+	if (switch_data->pdata->direction == SWITCH_GPIO_INPUT && switch_data->irq >= 0)
+		free_irq(switch_data->irq, switch_data);
+	gpio_free(switch_data->pdata->gpio);
 	switch_dev_unregister(&switch_data->sdev);
 	kfree(switch_data);
 

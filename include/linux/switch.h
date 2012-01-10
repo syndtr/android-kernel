@@ -24,7 +24,7 @@
 #include <linux/workqueue.h>
 
 #define SWITCH_ATTR_READABLE	(1 << 0)
-#define SWITCH_ATTR_WRITEABLE	(1 << 1)
+#define SWITCH_ATTR_WRITABLE	(1 << 1)
 #define SWITCH_ATTR_UEVENT	(1 << 2)
 #define SWITCH_ATTR_IGNSTATE	(1 << 3)
 
@@ -45,7 +45,7 @@ struct switch_attr {
 	const char	*name;
 	const char	**states;
 	unsigned	states_nr;
-	unsigned	state;
+	unsigned	state, newstate;
 
 	int (*get_state)(struct switch_dev *sdev, struct switch_attr *attr);
 	int (*set_state)(struct switch_dev *sdev, struct switch_attr *attr, unsigned state);
@@ -53,7 +53,7 @@ struct switch_attr {
 	int		flags;
 
 	struct work_struct wq;
-	struct device_attribute dev_attr;
+	struct device_attribute *dev_attr;
 	struct switch_handler_list *handlers;
 	struct switch_dev *sdev;
 };
@@ -79,9 +79,29 @@ struct switch_handler {
 	struct switch_handler_list *top;
 };
 
+enum {
+	SWITCH_GPIO_INPUT,
+	SWITCH_GPIO_OUTPUT
+};
+
 struct gpio_switch_platform_data {
 	const char	*name;
 	unsigned 	gpio;
+
+	/* if NULL, switch_dev.name will be printed */
+	const char	*name_on;
+	const char	*name_off;
+	/* if NULL, "0" or "1" will be printed */
+	const char	*state_on;
+	const char	*state_off;
+
+	int		direction;
+	unsigned	value;
+};
+
+struct toggle_switch_platform_data {
+	const char	*name;
+	void (*func)(bool);
 
 	/* if NULL, switch_dev.name will be printed */
 	const char	*name_on;
