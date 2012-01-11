@@ -526,7 +526,7 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 
 	host->hw_name = "samsung-hsmmc";
 	host->ops = &sdhci_s3c_ops;
-	host->quirks = 0;
+	host->quirks = pdata->host_quirks;
 	host->irq = irq;
 
 	/* Setup quirks for the controller */
@@ -559,23 +559,15 @@ static int __devinit sdhci_s3c_probe(struct platform_device *pdev)
 	if (pdata->cd_type == S3C_SDHCI_CD_PERMANENT)
 		host->mmc->caps = MMC_CAP_NONREMOVABLE;
 
-	if (pdata->host_caps)
-		host->mmc->caps |= pdata->host_caps;
+	host->mmc->caps |= pdata->host_caps;
+	host->mmc->pm_caps |= pdata->pm_caps;
+	host->mmc->pm_flags |= pdata->pm_flags;
 
 	host->quirks |= (SDHCI_QUIRK_32BIT_DMA_ADDR |
 			 SDHCI_QUIRK_32BIT_DMA_SIZE);
 
 	/* HSMMC on Samsung SoCs uses SDCLK as timeout clock */
 	host->quirks |= SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK;
-
-	if (pdata->card_is_builtin) {
-		/* Keep power for built-in card */
-		host->mmc->pm_caps = MMC_PM_KEEP_POWER;
-		host->mmc->pm_flags = MMC_PM_KEEP_POWER;
-
-		/* Provide invalid timeout value if card is built-in */
-		host->quirks |= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL;
-	}
 
 	/*
 	 * If controller does not have internal clock divider,
@@ -672,10 +664,6 @@ static int __devexit sdhci_s3c_remove(struct platform_device *pdev)
 static int sdhci_s3c_suspend(struct device *dev)
 {
 	struct sdhci_host *host = dev_get_drvdata(dev);
-	struct sdhci_s3c *sc = sdhci_priv(host);
-
-	if (sc->pdata->card_is_builtin)
-		host->mmc->pm_flags |= MMC_PM_KEEP_POWER;
 
 	return sdhci_suspend_host(host);
 }

@@ -67,6 +67,9 @@ enum clk_types {
 struct s3c_sdhci_platdata {
 	unsigned int	max_width;
 	unsigned int	host_caps;
+	unsigned int	host_quirks;
+	unsigned int	pm_caps;
+	unsigned int	pm_flags;
 	enum cd_types	cd_type;
 	enum clk_types	clk_type;
 
@@ -84,8 +87,6 @@ struct s3c_sdhci_platdata {
 			    void __iomem *regbase,
 			    struct mmc_ios *ios,
 			    struct mmc_card *card);
-
-	bool	card_is_builtin;
 };
 
 /* s3c_sdhci_set_platdata() - common helper for setting SDHCI platform data
