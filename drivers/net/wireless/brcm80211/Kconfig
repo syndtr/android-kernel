@@ -28,6 +28,21 @@ config BRCMFMAC
 	  wireless extensions subsystem.  If you choose to build a module,
 	  it'll be called brcmfmac.ko.
 
+
+config BRCMFMAC_FW_NAME
+	depends on BRCMFMAC
+	string "Firmware path"
+	default "brcm/bcm4329-fullmac-4.bin"
+	---help---
+	  Path to the firmware file.
+
+config BRCMFMAC_NV_NAME
+	depends on BRCMFMAC
+	string "NVRAM path"
+	default "brcm/bcm4329-fullmac-4.txt"
+	---help---
+	  Path to the nvram file.
+
 config BRCMDBG
 	bool "Broadcom driver debug functions"
 	depends on BRCMSMAC || BRCMFMAC
