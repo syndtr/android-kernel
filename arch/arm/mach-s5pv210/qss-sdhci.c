@@ -13,6 +13,10 @@
 #include <linux/io.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/delay.h>
+#include <linux/switch.h>
+#include <linux/mmc/sdhci.h>
+#include <linux/mmc/pm.h>
 
 #include <mach/irqs.h>
 #include <mach/gpio.h>
@@ -35,11 +39,23 @@ void qss_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)
 struct s3c_sdhci_platdata hsmmc0_platdata = {
 	.cd_type		= S3C_SDHCI_CD_PERMANENT,
 	.cfg_gpio		= qss_setup_sdhci0_cfg_gpio,
-	.card_is_builtin	= true,
+	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
 };
 
+void (*qss_sdhci1_notify_func)(struct platform_device *, int);
+
+int qss_sdhci1_ext_cd_init(void (*notify_func)(struct platform_device *, int))
+{
+	qss_sdhci1_notify_func = notify_func;
+	return 0;
+}
+
 struct s3c_sdhci_platdata hsmmc1_platdata = {
-	.cd_type		= S3C_SDHCI_CD_INTERNAL,
+	.cd_type		= S3C_SDHCI_CD_EXTERNAL,
+	.ext_cd_init		= qss_sdhci1_ext_cd_init,
+	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
+	.pm_caps		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY,
+	.pm_flags		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY,
 };
 
 void qss_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
