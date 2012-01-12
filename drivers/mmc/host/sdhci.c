@@ -2332,7 +2332,7 @@ out:
 
 int sdhci_suspend_host(struct sdhci_host *host)
 {
-	int ret;
+	int ret = 0;
 
 	sdhci_disable_card_detection(host);
 
@@ -2344,9 +2344,11 @@ int sdhci_suspend_host(struct sdhci_host *host)
 			host->tuning_count * HZ);
 	}
 
-	ret = mmc_suspend_host(host->mmc);
-	if (ret)
-		return ret;
+	if (!(host->mmc->pm_caps & MMC_PM_SDHCI_SKIP_PM)) {
+		ret = mmc_suspend_host(host->mmc);
+		if (ret)
+			return ret;
+	}
 
 	free_irq(host->irq, host);
 
@@ -2381,7 +2383,9 @@ int sdhci_resume_host(struct sdhci_host *host)
 	sdhci_init(host, (host->mmc->pm_flags & MMC_PM_KEEP_POWER));
 	mmiowb();
 
-	ret = mmc_resume_host(host->mmc);
+	if (!(host->mmc->pm_caps & MMC_PM_SDHCI_SKIP_PM))
+		ret = mmc_resume_host(host->mmc);
+
 	sdhci_enable_card_detection(host);
 
 	/* Set the re-tuning expiration flag */
