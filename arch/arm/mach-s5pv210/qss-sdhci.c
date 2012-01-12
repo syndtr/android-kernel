@@ -54,8 +54,10 @@ struct s3c_sdhci_platdata hsmmc1_platdata = {
 	.cd_type		= S3C_SDHCI_CD_EXTERNAL,
 	.ext_cd_init		= qss_sdhci1_ext_cd_init,
 	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
-	.pm_caps		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY,
-	.pm_flags		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY,
+	.pm_caps		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY |
+				  MMC_PM_SDHCI_SKIP_PM,
+	.pm_flags		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY |
+				  MMC_PM_SDHCI_SKIP_PM,
 };
 
 void qss_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
