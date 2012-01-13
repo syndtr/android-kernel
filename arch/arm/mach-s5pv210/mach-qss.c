@@ -136,6 +136,8 @@ static void __init qss_machine_init(void)
 
 	/* Media */
 	qss_media_init();
+	
+	qss_wifi_init();
 }
 
 MACHINE_START(QSS, "QSS")
