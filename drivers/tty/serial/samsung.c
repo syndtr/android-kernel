@@ -1188,14 +1188,14 @@ static int s3c24xx_serial_probe(struct platform_device *pdev)
 	struct s3c24xx_uart_port *ourport;
 	int ret;
 
-	dbg("s3c24xx_serial_probe(%p) %d\n", pdev, pdev->dev.id);
+	dbg("s3c24xx_serial_probe(%p) %d\n", pdev, pdev->id);
 
-	if (pdev->dev.id < 0 || pdev->dev.id >= ARRAY_SIZE(s3c24xx_serial_ports)) {
-		dev_err(&pdev->dev, "unsupported device id %d\n", pdev->dev.id);
+	if (pdev->id < 0 || pdev->id >= ARRAY_SIZE(s3c24xx_serial_ports)) {
+		dev_err(&pdev->dev, "unsupported device id %d\n", pdev->id);
 		return -ENODEV;
 	}
 
-	ourport = &s3c24xx_serial_ports[pdev->dev.id];
+	ourport = &s3c24xx_serial_ports[pdev->id];
 
 	ourport->drv_data = s3c24xx_get_driver_data(pdev);
 	if (!ourport->drv_data) {
@@ -1210,7 +1210,7 @@ static int s3c24xx_serial_probe(struct platform_device *pdev)
 
 	ourport->port.fifosize = (ourport->info->fifosize) ?
 		ourport->info->fifosize :
-		ourport->drv_data->fifosize[pdev->dev.id];
+		ourport->drv_data->fifosize[pdev->id];
 
 	dbg("%s: initialising port %p...\n", __func__, ourport);
 
