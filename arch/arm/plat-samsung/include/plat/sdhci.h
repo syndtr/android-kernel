@@ -19,9 +19,7 @@
 #define __PLAT_S3C_SDHCI_H __FILE__
 
 struct platform_device;
-struct mmc_host;
-struct mmc_card;
-struct mmc_ios;
+struct sdhci_host;
 
 enum cd_types {
 	S3C_SDHCI_CD_INTERNAL,	/* use mmc internal CD line */
@@ -81,10 +79,8 @@ struct s3c_sdhci_platdata {
 						      int state));
 
 	void	(*cfg_gpio)(struct platform_device *dev, int width);
-	void	(*cfg_card)(struct platform_device *dev,
-			    void __iomem *regbase,
-			    struct mmc_ios *ios,
-			    struct mmc_card *card);
+	void	(*cfg_clock)(struct platform_device *dev,
+			    struct sdhci_host *host, unsigned int clock);
 };
 
 /* s3c_sdhci_set_platdata() - common helper for setting SDHCI platform data

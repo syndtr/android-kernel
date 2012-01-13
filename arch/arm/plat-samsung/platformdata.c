@@ -55,6 +55,8 @@ void s3c_sdhci_set_platdata(struct s3c_sdhci_platdata *pd,
 		set->max_width = pd->max_width;
 	if (pd->cfg_gpio)
 		set->cfg_gpio = pd->cfg_gpio;
+	if (pd->cfg_clock)
+		set->cfg_clock = pd->cfg_clock;
 	if (pd->clk_type)
 		set->clk_type = pd->clk_type;
 }

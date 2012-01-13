@@ -38,40 +38,50 @@
 #define S3C_SDHCI_CTRL3_FCSELRX_BASIC \
 	(S3C_SDHCI_CTRL3_FCSEL1 | S3C_SDHCI_CTRL3_FCSEL0)
 
-void qss_setup_sdhci_cfg_card(struct platform_device *dev,
-				    void __iomem *r,
-				    struct mmc_ios *ios,
-				    struct mmc_card *card)
+static void qss_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)
+{
+	s5pv210_setup_sdhci0_cfg_gpio(dev, width);
+
+	s3c_gpio_cfgrange_nopull(GPIO_MASSMEMORY_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_MASSMEMORY_EN, 1);
+}
+
+static struct s3c_sdhci_platdata hsmmc0_platdata = {
+	.cd_type		= S3C_SDHCI_CD_PERMANENT,
+	.cfg_gpio		= qss_setup_sdhci0_cfg_gpio,
+	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
+};
+
+void (*qss_sdhci1_notify_func)(struct platform_device *, int);
+
+static int qss_sdhci1_ext_cd_init(void (*notify_func)(struct platform_device *, int))
+{
+	qss_sdhci1_notify_func = notify_func;
+	return 0;
+}
+
+static void qss_setup_sdhci1_cfg_clock(struct platform_device *dev,
+			       struct sdhci_host *host, unsigned int clock)
 {
 	u32 ctrl2;
 	u32 ctrl3;
 
-	ctrl2 = readl(r + S3C_SDHCI_CONTROL2);
+	ctrl2 = readl(host->ioaddr + S3C_SDHCI_CONTROL2);
 	ctrl2 &= S3C_SDHCI_CTRL2_SELBASECLK_MASK;
 	ctrl2 |= (S3C64XX_SDHCI_CTRL2_ENSTAASYNCCLR |
 		  S3C64XX_SDHCI_CTRL2_ENCMDCNFMSK |
 		  S3C_SDHCI_CTRL2_DFCNT_NONE |
 		  S3C_SDHCI_CTRL2_ENCLKOUTHOLD);
 
-	if (ios->clock <= (400 * 1000)) {
+	if (clock <= (400 * 1000)) {
 		ctrl2 &= ~(S3C_SDHCI_CTRL2_ENFBCLKTX |
 			   S3C_SDHCI_CTRL2_ENFBCLKRX);
 		ctrl3 = 0;
 	} else {
-		u32 range_start;
-		u32 range_end;
-
 		ctrl2 |= S3C_SDHCI_CTRL2_ENFBCLKTX |
 			 S3C_SDHCI_CTRL2_ENFBCLKRX;
 
-		if (card->type == MMC_TYPE_MMC)  /* MMC */
-			range_start = 20 * 1000 * 1000;
-		else    /* SD, SDIO */
-			range_start = 25 * 1000 * 1000;
-
-		range_end = 37 * 1000 * 1000;
-
-		if ((ios->clock > range_start) && (ios->clock < range_end))
+		if ((clock >  25 * 1000 * 1000) && (clock < 37 * 1000 * 1000))
 			ctrl3 = S3C_SDHCI_CTRL3_FCSELTX_BASIC |
 				S3C_SDHCI_CTRL3_FCSELRX_BASIC;
 		else
@@ -80,37 +90,14 @@ void qss_setup_sdhci_cfg_card(struct platform_device *dev,
 	}
 
 
-	writel(ctrl2, r + S3C_SDHCI_CONTROL2);
-	writel(ctrl3, r + S3C_SDHCI_CONTROL3);
+	writel(ctrl2, host->ioaddr + S3C_SDHCI_CONTROL2);
+	writel(ctrl3, host->ioaddr + S3C_SDHCI_CONTROL3);
 }
 
-void qss_setup_sdhci0_cfg_gpio(struct platform_device *dev, int width)
-{
-	s5pv210_setup_sdhci0_cfg_gpio(dev, width);
-
-	s3c_gpio_cfgrange_nopull(GPIO_MASSMEMORY_EN, 1, S3C_GPIO_OUTPUT);
-	gpio_set_value(GPIO_MASSMEMORY_EN, 1);
-}
-
-struct s3c_sdhci_platdata hsmmc0_platdata = {
-	.cd_type		= S3C_SDHCI_CD_PERMANENT,
-	.cfg_gpio		= qss_setup_sdhci0_cfg_gpio,
-	.cfg_card		= qss_setup_sdhci_cfg_card,
-	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
-};
-
-void (*qss_sdhci1_notify_func)(struct platform_device *, int);
-
-int qss_sdhci1_ext_cd_init(void (*notify_func)(struct platform_device *, int))
-{
-	qss_sdhci1_notify_func = notify_func;
-	return 0;
-}
-
-struct s3c_sdhci_platdata hsmmc1_platdata = {
+static struct s3c_sdhci_platdata hsmmc1_platdata = {
 	.cd_type		= S3C_SDHCI_CD_EXTERNAL,
 	.ext_cd_init		= qss_sdhci1_ext_cd_init,
-	.cfg_card		= qss_setup_sdhci_cfg_card,
+	.cfg_clock		= qss_setup_sdhci1_cfg_clock,
 	.host_quirks		= SDHCI_QUIRK_BROKEN_TIMEOUT_VAL,
 	.pm_caps		= MMC_PM_KEEP_POWER | MMC_PM_IGNORE_PM_NOTIFY |
 				  MMC_PM_SDHCI_SKIP_PM,
@@ -118,19 +105,18 @@ struct s3c_sdhci_platdata hsmmc1_platdata = {
 				  MMC_PM_SDHCI_SKIP_PM,
 };
 
-void qss_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
+static void qss_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
 {
 	s5pv210_setup_sdhci2_cfg_gpio(dev, width);
 
 	s3c_gpio_cfgrange_nopull(GPIO_SDHCI2_CD_INT, 1, EINT_MODE);
 }
 
-struct s3c_sdhci_platdata hsmmc2_platdata = {
+static struct s3c_sdhci_platdata hsmmc2_platdata = {
 	.cd_type		= S3C_SDHCI_CD_GPIO,
 	.ext_cd_gpio		= GPIO_SDHCI2_CD_INT,
 	.ext_cd_gpio_invert	= true,
 	.cfg_gpio		= qss_setup_sdhci2_cfg_gpio,
-	.cfg_card		= qss_setup_sdhci_cfg_card,
 };
 
 static struct platform_device *qss_devices[] __initdata = {
