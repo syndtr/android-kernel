@@ -7,10 +7,10 @@
  * files take a comma separated list of numbers in ascending order.
  *
  * For example, write "0,8" to /sys/module/lowmemorykiller/parameters/adj and
- * "1024,4096" to /sys/module/lowmemorykiller/parameters/minfree to kill processes
- * with a oom_adj value of 8 or higher when the free memory drops below 4096 pages
- * and kill processes with a oom_adj value of 0 or higher when the free memory
- * drops below 1024 pages.
+ * "1024,4096" to /sys/module/lowmemorykiller/parameters/minfree to kill
+ * processes with a oom_adj value of 8 or higher when the free memory drops
+ * below 4096 pages and kill processes with a oom_adj value of 0 or higher
+ * when the free memory drops below 1024 pages.
  *
  * The driver considers memory used for caches to be free, but if a large
  * percentage of the cached memory is locked this can be very inaccurate
@@ -34,6 +34,7 @@
 #include <linux/mm.h>
 #include <linux/oom.h>
 #include <linux/sched.h>
+#include <linux/profile.h>
 #include <linux/notifier.h>
 
 static uint32_t lowmem_debug_level = 2;
@@ -53,7 +54,6 @@ static size_t lowmem_minfree[6] = {
 static int lowmem_minfree_size = 4;
 
 static struct task_struct *lowmem_deathpending;
-static unsigned long lowmem_deathpending_timeout;
 
 #define lowmem_print(level, x...)			\
 	do {						\
@@ -72,10 +72,10 @@ static int
 task_notify_func(struct notifier_block *self, unsigned long val, void *data)
 {
 	struct task_struct *task = data;
-
-	if (task == lowmem_deathpending)
+	if (task == lowmem_deathpending) {
 		lowmem_deathpending = NULL;
-
+		task_handoff_unregister(&task_nb);
+	}
 	return NOTIFY_OK;
 }
 
@@ -100,9 +100,10 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	 * that we have nothing further to offer on
 	 * this pass.
 	 *
+	 * Note: Currently you need CONFIG_PROFILING
+	 * for this to work correctly.
 	 */
-	if (lowmem_deathpending &&
-	    time_before_eq(jiffies, lowmem_deathpending_timeout))
+	if (lowmem_deathpending)
 		return 0;
 
 	if (lowmem_adj_size < array_size)
@@ -118,8 +119,8 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	}
 	if (sc->nr_to_scan > 0)
 		lowmem_print(3, "lowmem_shrink %lu, %x, ofree %d %d, ma %d\n",
-			     sc->nr_to_scan, sc->gfp_mask, other_free, other_file,
-			     min_adj);
+				sc->nr_to_scan, sc->gfp_mask, other_free,
+				other_file, min_adj);
 	rem = global_page_state(NR_ACTIVE_ANON) +
 		global_page_state(NR_ACTIVE_FILE) +
 		global_page_state(NR_INACTIVE_ANON) +
@@ -170,8 +171,15 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 		lowmem_print(1, "send sigkill to %d (%s), adj %d, size %d\n",
 			     selected->pid, selected->comm,
 			     selected_oom_adj, selected_tasksize);
+		/*
+		 * If CONFIG_PROFILING is off, then task_handoff_register()
+		 * is a nop. In that case we don't want to stall the killer
+		 * by setting lowmem_deathpending.
+		 */
+#ifdef CONFIG_PROFILING
 		lowmem_deathpending = selected;
-		lowmem_deathpending_timeout = jiffies + HZ;
+		task_handoff_register(&task_nb);
+#endif
 		force_sig(SIGKILL, selected);
 		rem -= selected_tasksize;
 	}
@@ -188,7 +196,6 @@ static struct shrinker lowmem_shrinker = {
 
 static int __init lowmem_init(void)
 {
-	task_free_register(&task_nb);
 	register_shrinker(&lowmem_shrinker);
 	return 0;
 }
@@ -196,7 +203,6 @@ static int __init lowmem_init(void)
 static void __exit lowmem_exit(void)
 {
 	unregister_shrinker(&lowmem_shrinker);
-	task_free_unregister(&task_nb);
 }
 
 module_param_named(cost, lowmem_shrinker.seeks, int, S_IRUGO | S_IWUSR);

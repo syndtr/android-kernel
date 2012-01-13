@@ -31,12 +31,11 @@
 #include <linux/timer.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
+#include <linux/reboot.h>
 
 #include <asm/fiq_debugger.h>
 #include <asm/fiq_glue.h>
 #include <asm/stacktrace.h>
-
-#include <mach/system.h>
 
 #include <linux/uaccess.h>
 
@@ -609,7 +608,7 @@ static bool debug_fiq_exec(struct fiq_debugger_state *state,
 	} else if (!strcmp(cmd, "bt")) {
 		dump_stacktrace(state, (struct pt_regs *)regs, 100, svc_sp);
 	} else if (!strcmp(cmd, "reboot")) {
-		arch_reset(0, 0);
+		machine_restart(NULL);
 	} else if (!strcmp(cmd, "irqs")) {
 		dump_irqs(state);
 	} else if (!strcmp(cmd, "kmsg")) {

@@ -347,7 +347,7 @@ static int s3c_udc_start(struct usb_gadget_driver *driver,
  *	.unbind         = __exit_p(composite_unbind),
  */
 	if (!driver
-	    || (driver->speed != USB_SPEED_FULL && driver->speed != USB_SPEED_HIGH)
+	    || driver->max_speed < USB_SPEED_FULL
 	    || !bind
 	    || !driver->disconnect || !driver->setup)
 		return -EINVAL;
@@ -1248,7 +1248,7 @@ static int s3c_udc_probe(struct platform_device *pdev)
 	device_initialize(&dev->gadget.dev);
 	dev->gadget.dev.parent = &pdev->dev;
 
-	dev->gadget.is_dualspeed = 1;	/* Hack only*/
+	dev->gadget.max_speed = USB_SPEED_HIGH;
 	dev->gadget.is_otg = 0;
 	dev->gadget.is_a_peripheral = 0;
 	dev->gadget.b_hnp_enable = 0;
@@ -1363,30 +1363,7 @@ static struct platform_driver s3c_udc_driver = {
 	},
 };
 
-static int __init udc_init(void)
-{
-	int ret;
-
-	ret = platform_driver_register(&s3c_udc_driver);
-	if (!ret)
-		printk(KERN_INFO "%s : %s\n"
-			"%s : version %s %s\n",
-			driver_name, DRIVER_DESC,
-			driver_name, DRIVER_VERSION, OTG_DMA_MODE ?
-			"(DMA Mode)" : "(Slave Mode)");
-
-	return ret;
-}
-
-static void __exit udc_exit(void)
-{
-	platform_driver_unregister(&s3c_udc_driver);
-	printk(KERN_INFO "Unloaded %s version %s\n",
-			  driver_name, DRIVER_VERSION);
-}
-
-module_init(udc_init);
-module_exit(udc_exit);
+module_platform_driver(s3c_udc_driver);
 
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_AUTHOR("Samsung");

@@ -362,7 +362,7 @@ static int __devinit reg_s5pv210_pd_probe(struct platform_device *pdev)
 	drvdata->ctrlbit = config->ctrlbit;
 
 	drvdata->dev = regulator_register(&drvdata->desc, &pdev->dev,
-					  config->init_data, drvdata);
+					  config->init_data, drvdata, NULL);
 	if (IS_ERR(drvdata->dev)) {
 		ret = PTR_ERR(drvdata->dev);
 		dev_err(&pdev->dev, "Failed to register regulator: %d\n", ret);

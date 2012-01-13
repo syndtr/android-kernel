@@ -14,6 +14,7 @@
 #include <linux/serial_core.h>
 #include <linux/sysdev.h>
 
+#include <asm/hardware/vic.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/setup.h>
@@ -23,57 +24,60 @@
 #include <mach/regs-clock.h>
 
 #include <plat/regs-serial.h>
-#include <plat/s5pv210.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
 #include <plat/s5p-time.h>
 
 #include <mach/qss.h>
 
+#include "common.h"
+
 /* Following are default values for UCON, ULCON and UFCON UART registers */
-#define SMDKC110_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
+#define GONI_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
 				 S3C2410_UCON_RXILEVEL |	\
 				 S3C2410_UCON_TXIRQMODE |	\
 				 S3C2410_UCON_RXIRQMODE |	\
 				 S3C2410_UCON_RXFIFO_TOI |	\
 				 S3C2443_UCON_RXERR_IRQEN)
 
-#define SMDKC110_ULCON_DEFAULT	S3C2410_LCON_CS8
+#define GONI_ULCON_DEFAULT	S3C2410_LCON_CS8
 
-#define SMDKC110_UFCON_DEFAULT	(S3C2410_UFCON_FIFOMODE |	\
-				 S5PV210_UFCON_TXTRIG4 |	\
-				 S5PV210_UFCON_RXTRIG4)
+#define GONI_UFCON_DEFAULT	S3C2410_UFCON_FIFOMODE
 
 static struct s3c2410_uartcfg qss_uartcfgs[] __initdata = {
 	{
 		.hwport		= 0,
 		.flags		= 0,
-		.ucon		= SMDKC110_UCON_DEFAULT,
-		.ulcon		= SMDKC110_ULCON_DEFAULT,
-		.ufcon		= SMDKC110_UFCON_DEFAULT,
+		.ucon		= GONI_UCON_DEFAULT,
+		.ulcon		= GONI_ULCON_DEFAULT,
+		.ufcon		= GONI_UFCON_DEFAULT |
+			S5PV210_UFCON_TXTRIG256 | S5PV210_UFCON_RXTRIG256,
 	},
 	{
 		.hwport		= 1,
 		.flags		= 0,
-		.ucon		= SMDKC110_UCON_DEFAULT,
-		.ulcon		= SMDKC110_ULCON_DEFAULT,
-		.ufcon		= SMDKC110_UFCON_DEFAULT,
+		.ucon		= GONI_UCON_DEFAULT,
+		.ulcon		= GONI_ULCON_DEFAULT,
+		.ufcon		= GONI_UFCON_DEFAULT |
+			S5PV210_UFCON_TXTRIG64 | S5PV210_UFCON_RXTRIG64,
 	},
 #ifndef CONFIG_FIQ_DEBUGGER
 	{
 		.hwport		= 2,
 		.flags		= 0,
-		.ucon		= SMDKC110_UCON_DEFAULT,
-		.ulcon		= SMDKC110_ULCON_DEFAULT,
-		.ufcon		= SMDKC110_UFCON_DEFAULT,
+		.ucon		= GONI_UCON_DEFAULT,
+		.ulcon		= GONI_ULCON_DEFAULT,
+		.ufcon		= GONI_UFCON_DEFAULT |
+			S5PV210_UFCON_TXTRIG16 | S5PV210_UFCON_RXTRIG16,
 	},
 #endif
 	{
 		.hwport		= 3,
 		.flags		= 0,
-		.ucon		= SMDKC110_UCON_DEFAULT,
-		.ulcon		= SMDKC110_ULCON_DEFAULT,
-		.ufcon		= SMDKC110_UFCON_DEFAULT,
+		.ucon		= GONI_UCON_DEFAULT,
+		.ulcon		= GONI_ULCON_DEFAULT,
+		.ufcon		= GONI_UFCON_DEFAULT |
+			S5PV210_UFCON_TXTRIG16 | S5PV210_UFCON_RXTRIG16,
 	},
 };
 
@@ -95,7 +99,7 @@ static void __init qss_fixup(struct tag *tag, char **cmdline,
 
 static void __init qss_map_io(void)
 {
-	s5p_init_io(NULL, 0, S5P_VA_CHIPID);
+	s5pv210_init_io(NULL, 0);
 	s3c24xx_init_clocks(24000000);
 	s3c24xx_init_uarts(qss_uartcfgs, ARRAY_SIZE(qss_uartcfgs));
 	s5p_set_timer_source(S5P_PWM3, S5P_PWM4);
@@ -144,7 +148,9 @@ MACHINE_START(QSS, "QSS")
 	.atag_offset	= 0x100,
 	.fixup		= qss_fixup,
 	.init_irq	= s5pv210_init_irq,
+	.handle_irq	= vic_handle_irq,
 	.map_io		= qss_map_io,
 	.init_machine	= qss_machine_init,
 	.timer		= &s5p_timer,
+	.restart	= qss_restart,
 MACHINE_END

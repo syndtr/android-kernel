@@ -84,6 +84,12 @@ enum {
 	CSS_REMOVED, /* This CSS is dead */
 };
 
+/* Caller must verify that the css is not for root cgroup */
+static inline void __css_get(struct cgroup_subsys_state *css, int count)
+{
+	atomic_add(count, &css->refcnt);
+}
+
 /*
  * Call css_get() to hold a reference on the css; it can be used
  * for a reference obtained via:
@@ -91,7 +97,6 @@ enum {
  * - task->cgroups for a locked task
  */
 
-extern void __css_get(struct cgroup_subsys_state *css, int count);
 static inline void css_get(struct cgroup_subsys_state *css)
 {
 	/* We don't need to reference count the root state */
@@ -138,7 +143,10 @@ static inline void css_put(struct cgroup_subsys_state *css)
 enum {
 	/* Control Group is dead */
 	CGRP_REMOVED,
-	/* Control Group has ever had a child cgroup or a task */
+	/*
+	 * Control Group has previously had a child cgroup or a task,
+	 * but no longer (only if CGRP_NOTIFY_ON_RELEASE is set)
+	 */
 	CGRP_RELEASABLE,
 	/* Control Group requires release notifications to userspace */
 	CGRP_NOTIFY_ON_RELEASE,
@@ -279,7 +287,6 @@ struct css_set {
 
 	/* For RCU-protected deletion */
 	struct rcu_head rcu_head;
-	struct work_struct work;
 };
 
 /*
@@ -312,7 +319,7 @@ struct cftype {
 	 * If not 0, file mode is set to this value, otherwise it will
 	 * be figured out automatically
 	 */
-	mode_t mode;
+	umode_t mode;
 
 	/*
 	 * If non-zero, defines the maximum length of string that can
@@ -450,6 +457,28 @@ void cgroup_exclude_rmdir(struct cgroup_subsys_state *css);
 void cgroup_release_and_wakeup_rmdir(struct cgroup_subsys_state *css);
 
 /*
+ * Control Group taskset, used to pass around set of tasks to cgroup_subsys
+ * methods.
+ */
+struct cgroup_taskset;
+struct task_struct *cgroup_taskset_first(struct cgroup_taskset *tset);
+struct task_struct *cgroup_taskset_next(struct cgroup_taskset *tset);
+struct cgroup *cgroup_taskset_cur_cgroup(struct cgroup_taskset *tset);
+int cgroup_taskset_size(struct cgroup_taskset *tset);
+
+/**
+ * cgroup_taskset_for_each - iterate cgroup_taskset
+ * @task: the loop cursor
+ * @skip_cgrp: skip if task's cgroup matches this, %NULL to iterate through all
+ * @tset: taskset to iterate
+ */
+#define cgroup_taskset_for_each(task, skip_cgrp, tset)			\
+	for ((task) = cgroup_taskset_first((tset)); (task);		\
+	     (task) = cgroup_taskset_next((tset)))			\
+		if (!(skip_cgrp) ||					\
+		    cgroup_taskset_cur_cgroup((tset)) != (skip_cgrp))
+
+/*
  * Control Group subsystem type.
  * See Documentation/cgroups/cgroups.txt for details
  */
@@ -459,16 +488,12 @@ struct cgroup_subsys {
 						  struct cgroup *cgrp);
 	int (*pre_destroy)(struct cgroup_subsys *ss, struct cgroup *cgrp);
 	void (*destroy)(struct cgroup_subsys *ss, struct cgroup *cgrp);
-	int (*allow_attach)(struct cgroup *cgrp, struct task_struct *tsk);
 	int (*can_attach)(struct cgroup_subsys *ss, struct cgroup *cgrp,
-			  struct task_struct *tsk);
-	int (*can_attach_task)(struct cgroup *cgrp, struct task_struct *tsk);
+			  struct cgroup_taskset *tset);
 	void (*cancel_attach)(struct cgroup_subsys *ss, struct cgroup *cgrp,
-			      struct task_struct *tsk);
-	void (*pre_attach)(struct cgroup *cgrp);
-	void (*attach_task)(struct cgroup *cgrp, struct task_struct *tsk);
+			      struct cgroup_taskset *tset);
 	void (*attach)(struct cgroup_subsys *ss, struct cgroup *cgrp,
-		       struct cgroup *old_cgrp, struct task_struct *tsk);
+		       struct cgroup_taskset *tset);
 	void (*fork)(struct cgroup_subsys *ss, struct task_struct *task);
 	void (*exit)(struct cgroup_subsys *ss, struct cgroup *cgrp,
 			struct cgroup *old_cgrp, struct task_struct *task);

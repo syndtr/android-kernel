@@ -33,7 +33,7 @@
 #include <mach/param.h>
 
 #include <plat/pm.h>
-#include <plat/reset.h>
+#include <plat/watchdog-reset.h>
 
 #include <mach/qss.h>
 
@@ -103,15 +103,7 @@ void __init qss_pm_init(void)
 	s3c_pm_init();
 }
 
-static int __init __qss_pm_init(void)
+void qss_restart(char mode, const char *cmd)
 {
-	if (!machine_is_qss())
-		return 0;
-
-	/* don't use sw reset */
-	s5p_reset_hook = NULL;
-
-	return 0;
+	arch_wdt_reset();
 }
-
-subsys_initcall(__qss_pm_init);

@@ -129,21 +129,21 @@ static int limit_adjust_cpufreq_notifier(struct notifier_block *nb,
 	return 0;
 }
 
-static struct notifier_block cpufreq_limit_notifier = {
+/*static struct notifier_block cpufreq_limit_notifier = {
 	.notifier_call = limit_adjust_cpufreq_notifier,
-};
+};*/
 
 IMG_VOID CPUFreqRegister(IMG_VOID)
 {
-	cpufreq_register_notifier(&cpufreq_limit_notifier,
-				  CPUFREQ_POLICY_NOTIFIER);
+	//cpufreq_register_notifier(&cpufreq_limit_notifier,
+	//			  CPUFREQ_POLICY_NOTIFIER);
 }
 
 IMG_VOID CPUFreqDeregister(IMG_VOID)
 {
-	cpufreq_unregister_notifier(&cpufreq_limit_notifier,
-				    CPUFREQ_POLICY_NOTIFIER);
-	cpufreq_update_policy(current_thread_info()->cpu);
+	//cpufreq_unregister_notifier(&cpufreq_limit_notifier,
+	//			    CPUFREQ_POLICY_NOTIFIER);
+	//cpufreq_update_policy(current_thread_info()->cpu);
 }
 
 PVRSRV_ERROR EnableSGXClocks(SYS_DATA *psSysData)
@@ -160,7 +160,7 @@ PVRSRV_ERROR EnableSGXClocks(SYS_DATA *psSysData)
 
 	regulator_enable(psSysSpecData->g3d_pd);
 	clk_enable(psSysSpecData->g3d_clk);
-	cpufreq_update_policy(current_thread_info()->cpu);
+	//cpufreq_update_policy(current_thread_info()->cpu);
 
 	SysEnableSGXInterrupts(psSysData);
 
@@ -190,7 +190,7 @@ IMG_VOID DisableSGXClocks(SYS_DATA *psSysData)
 
 	clk_disable(psSysSpecData->g3d_clk);
 	regulator_disable(psSysSpecData->g3d_pd);
-	cpufreq_update_policy(current_thread_info()->cpu);
+	//cpufreq_update_policy(current_thread_info()->cpu);
 	
 	atomic_set(&psSysSpecData->sSGXClocksEnabled, 0);
 

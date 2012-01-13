@@ -30,7 +30,6 @@
 #include <mach/map.h>
 
 #include <plat/regs-serial.h>
-#include <plat/s5pv210.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
 
