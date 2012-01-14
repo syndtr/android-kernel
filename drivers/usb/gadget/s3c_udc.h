@@ -39,6 +39,7 @@
 #include <linux/mm.h>
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
+#include <linux/wakelock.h>
 
 #include <asm/byteorder.h>
 #include <asm/dma.h>

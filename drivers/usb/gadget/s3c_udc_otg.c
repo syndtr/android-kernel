@@ -446,26 +446,33 @@ static int s3c_udc_power(struct s3c_udc *dev, char en)
 	return 0;
 }
 
-int s3c_vbus_enable(struct usb_gadget *gadget, int enable)
+static void _s3c_vbus_enable(int enable)
 {
 	unsigned long flags;
 	struct s3c_udc *dev = the_controller;
 
+	if (!enable) {
+		spin_lock_irqsave(&dev->lock, flags);
+		stop_activity(dev, dev->driver);
+		spin_unlock_irqrestore(&dev->lock, flags);
+		udc_disable(dev);
+		clk_disable(otg_clock);
+		s3c_udc_power(dev, 0);
+	} else {
+		s3c_udc_power(dev, 1);
+		clk_enable(otg_clock);
+		udc_reinit(dev);
+		udc_enable(dev);
+	}
+}
+
+int s3c_vbus_enable(struct usb_gadget *gadget, int enable)
+{
+	struct s3c_udc *dev = the_controller;
+
 	if (dev->udc_enabled != enable) {
 		dev->udc_enabled = enable;
-		if (!enable) {
-			spin_lock_irqsave(&dev->lock, flags);
-			stop_activity(dev, dev->driver);
-			spin_unlock_irqrestore(&dev->lock, flags);
-			udc_disable(dev);
-			clk_disable(otg_clock);
-			s3c_udc_power(dev, 0);
-		} else {
-			s3c_udc_power(dev, 1);
-			clk_enable(otg_clock);
-			udc_reinit(dev);
-			udc_enable(dev);
-		}
+		_s3c_vbus_enable(enable);
 	} else
 		dev_dbg(&dev->gadget.dev, "%s, udc : %d, en : %d\n",
 				__func__, dev->udc_enabled, enable);
@@ -1330,7 +1337,7 @@ static int s3c_udc_suspend(struct platform_device *pdev, pm_message_t state)
 		dev->driver->suspend(&dev->gadget);
 
 	if (dev->udc_enabled)
-		usb_gadget_vbus_disconnect(&dev->gadget);
+		_s3c_vbus_enable(0);
 
 	return 0;
 }
@@ -1338,6 +1345,9 @@ static int s3c_udc_suspend(struct platform_device *pdev, pm_message_t state)
 static int s3c_udc_resume(struct platform_device *pdev)
 {
 	struct s3c_udc *dev = the_controller;
+
+	if (dev->udc_enabled)
+		_s3c_vbus_enable(1);
 
 	if (dev->driver && dev->driver->resume)
 		dev->driver->resume(&dev->gadget);
