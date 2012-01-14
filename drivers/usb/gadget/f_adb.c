@@ -26,6 +26,7 @@
 #include <linux/types.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
+#include <linux/wakelock.h>
 
 #define ADB_BULK_BUFFER_SIZE           4096
 
@@ -55,6 +56,9 @@ struct adb_dev {
 	wait_queue_head_t write_wq;
 	struct usb_request *rx_req;
 	int rx_done;
+
+	int wl_done;
+	struct wake_lock wl;
 };
 
 static struct usb_interface_descriptor adb_interface_desc = {
@@ -295,6 +299,11 @@ static ssize_t adb_read(struct file *fp, char __user *buf,
 		goto done;
 	}
 
+	if (!_adb_dev->wl_done) {
+		_adb_dev->wl_done = 1;
+		wake_lock(&_adb_dev->wl);
+	}
+
 requeue_req:
 	/* queue a request */
 	req = dev->rx_req;
@@ -418,12 +427,21 @@ static int adb_open(struct inode *ip, struct file *fp)
 	/* clear the error latch */
 	_adb_dev->error = 0;
 
+	if (_adb_dev->wl_done) {
+		wake_unlock(&_adb_dev->wl);
+		_adb_dev->wl_done = 0;
+	}
+
 	return 0;
 }
 
 static int adb_release(struct inode *ip, struct file *fp)
 {
 	printk(KERN_INFO "adb_release\n");
+	if (_adb_dev->wl_done) {
+		wake_unlock(&_adb_dev->wl);
+		_adb_dev->wl_done = 0;
+	}
 	adb_unlock(&_adb_dev->open_excl);
 	return 0;
 }
@@ -584,6 +602,9 @@ static int adb_setup(void)
 	atomic_set(&dev->write_excl, 0);
 
 	INIT_LIST_HEAD(&dev->tx_idle);
+	
+	wake_lock_init(&dev->wl, WAKE_LOCK_SUSPEND, "f_adb");
+	dev->wl_done = 0;
 
 	_adb_dev = dev;
 
@@ -594,6 +615,7 @@ static int adb_setup(void)
 	return 0;
 
 err:
+	wake_lock_destroy(&dev->wl);
 	kfree(dev);
 	printk(KERN_ERR "adb gadget driver failed to initialize\n");
 	return ret;
@@ -602,6 +624,7 @@ err:
 static void adb_cleanup(void)
 {
 	misc_deregister(&adb_device);
+	wake_lock_destroy(&_adb_dev->wl);
 
 	kfree(_adb_dev);
 	_adb_dev = NULL;
