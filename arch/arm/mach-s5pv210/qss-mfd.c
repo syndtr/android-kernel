@@ -11,7 +11,6 @@
 #include <linux/i2c.h>
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/max8998.h>
-#include <linux/max17040_battery.h>
 #include <linux/gpio.h>
 
 #include <mach/irqs.h>
@@ -32,6 +31,7 @@ static struct regulator_consumer_supply ldo3_consumer[] = {
 
 static struct regulator_consumer_supply ldo4_consumer[] = {
 	{ .supply = "vadc", },
+	REGULATOR_SUPPLY("vdd", "samsung-adc-v3")
 };
 
 static struct regulator_consumer_supply ldo5_consumer[] = {
@@ -84,6 +84,14 @@ static struct regulator_consumer_supply buck2_consumer[] = {
 
 static struct regulator_consumer_supply buck4_consumer[] = {
 	{ .supply = "cam_isp_core", },
+};
+
+static struct regulator_consumer_supply esafeout1_consumer[] = {
+	{ .supply = "esafeout1", },
+};
+
+static struct regulator_consumer_supply charger_consumer[] = {
+	{ .supply = "charger", },
 };
 
 /* Regulators */
@@ -354,6 +362,25 @@ static struct regulator_init_data qss_buck4_data = {
 	.consumer_supplies	= buck4_consumer,
 };
 
+static struct regulator_init_data qss_esafeout1_data = {
+	.constraints	= {
+		.name		= "ESAFEOUT1",
+		.always_on	= true,
+		.valid_ops_mask	= REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(esafeout1_consumer),
+	.consumer_supplies	= esafeout1_consumer,
+};
+
+static struct regulator_init_data qss_charger_data = {
+	.constraints	= {
+		.name		= "CHARGER",
+		.valid_ops_mask	= REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(charger_consumer),
+	.consumer_supplies	= charger_consumer,
+};
+
 static struct max8998_regulator_data qss_regulators[] = {
 	{ MAX8998_LDO2,  &qss_ldo2_data },
 	{ MAX8998_LDO3,  &qss_ldo3_data },
@@ -373,6 +400,8 @@ static struct max8998_regulator_data qss_regulators[] = {
 	{ MAX8998_BUCK2, &qss_buck2_data },
 	{ MAX8998_BUCK3, &qss_buck3_data },
 	{ MAX8998_BUCK4, &qss_buck4_data },
+	{ MAX8998_ESAFEOUT1, &qss_esafeout1_data },
+	{ MAX8998_CHARGER,   &qss_charger_data },
 };
 
 static struct max8998_platform_data max8998_pdata = {
@@ -391,9 +420,9 @@ static struct max8998_platform_data max8998_pdata = {
 	.buck2_set3	= GPIO_BUCK_2_EN,
 	.buck2_default_idx = 0,
 	.wakeup		= true,
-	.eoc		= 0,
-	.restart	= 0,
-	.timeout	= 5,
+	.eoc		= 0, /* ac=20 - usb=40 */
+	.restart	= -1,
+	.timeout	= 6,
 	
 };
 
@@ -402,15 +431,6 @@ static struct i2c_board_info i2c6_devs[] __initdata = {
 		/* The address is 0xCC used since SRAD = 0 */
 		I2C_BOARD_INFO("max8998", (0xCC >> 1)),
 		.platform_data	= &max8998_pdata,
-	},
-};
-
-static struct max17040_platform_data max17040_pdata = { 0 };
-
-static struct i2c_board_info i2c9_devs[] __initdata = {
-	{
-		I2C_BOARD_INFO("max17040", (0x6D >> 1)),
-		.platform_data = &max17040_pdata,
 	},
 };
 
@@ -431,23 +451,18 @@ static void __init qss_mfd_cfg_gpio(void)
 
 static struct platform_device *qss_devices[] __initdata = {
 	&s3c_device_i2c6,
-	&s3c_device_i2c9,
 };
 
 void __init qss_mfd_init(void)
 {
 	/* i2c gpio cfg */
 	s3c_i2c6_cfg_gpio(&s3c_device_i2c6);
-	s3c_i2c9_cfg_gpio(&s3c_device_i2c9);
 
 	/* register devices */
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
-	
+
 	/* max8998 */
 	qss_mfd_cfg_gpio();
 	i2c_register_board_info(6, i2c6_devs, ARRAY_SIZE(i2c6_devs));
 	regulator_has_full_constraints();
-	
-	/* max17040 */
-	i2c_register_board_info(9, i2c9_devs, ARRAY_SIZE(i2c9_devs));
 }
