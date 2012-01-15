@@ -1314,6 +1314,9 @@ static int s3c_udc_remove(struct platform_device *pdev)
 		otg_clock = NULL;
 	}
 
+	switch_handler_remove(&switch_handler_usb);
+	switch_handler_remove(&switch_handler_deskdock);
+
 	remove_proc_files();
 	usb_gadget_unregister_driver(dev->driver);
 
