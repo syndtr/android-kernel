@@ -27,53 +27,107 @@
 #include <linux/power_supply.h>
 #include <linux/mfd/max8998.h>
 #include <linux/mfd/max8998-private.h>
+#include <linux/switch.h>
+#include <linux/platform_data/fsa9480.h>
 
 struct max8998_battery_data {
 	struct device *dev;
 	struct max8998_dev *iodev;
-	struct power_supply battery;
+	struct power_supply psy_ac;
+	struct power_supply psy_usb;
+	struct switch_handler sw_ac;
+	struct switch_handler sw_usb;
+	struct switch_handler sw_deskdock;
+	unsigned state_ac, state_usb;
 };
 
-static enum power_supply_property max8998_battery_props[] = {
-	POWER_SUPPLY_PROP_PRESENT, /* the presence of battery */
+static enum power_supply_property max8998_psy_props[] = {
+	POWER_SUPPLY_PROP_PRESENT, /* the presence of charger */
 	POWER_SUPPLY_PROP_ONLINE, /* charger is active or not */
+	POWER_SUPPLY_PROP_CHARGE_TYPE, /* the type of charger */
 };
 
 /* Note that the charger control is done by a current regulator "CHARGER" */
-static int max8998_battery_get_property(struct power_supply *psy,
+static int max8998_psy_get_property(struct power_supply *psy,
 		enum power_supply_property psp,
 		union power_supply_propval *val)
 {
-	struct max8998_battery_data *max8998 = container_of(psy,
-			struct max8998_battery_data, battery);
-	struct i2c_client *i2c = max8998->iodev->i2c;
+	struct max8998_battery_data *max8998;
+	struct i2c_client *i2c;
+	unsigned state;
 	int ret;
 	u8 reg;
 
+	if (psy->type == POWER_SUPPLY_TYPE_MAINS) {
+		max8998 = container_of(psy, struct max8998_battery_data, psy_ac);
+		state = max8998->state_ac;
+	} else {
+		max8998 = container_of(psy, struct max8998_battery_data, psy_usb);
+		state = max8998->state_usb;
+	}
+
+	i2c = max8998->iodev->i2c;
+
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
+		if (!state) {
+			val->intval = 0;
+			return 0;
+		}
 		ret = max8998_read_reg(i2c, MAX8998_REG_STATUS2, &reg);
 		if (ret)
 			return ret;
-		if (reg & (1 << 4))
-			val->intval = 0;
-		else
-			val->intval = 1;
+		val->intval = !!(reg & MAX8998_MASK_VDCIN);
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
+		if (!state) {
+			val->intval = 0;
+			return 0;
+		}
 		ret = max8998_read_reg(i2c, MAX8998_REG_STATUS2, &reg);
 		if (ret)
 			return ret;
-		if (reg & (1 << 3))
-			val->intval = 0;
-		else
-			val->intval = 1;
+		val->intval = !!(reg & MAX8998_MASK_CHGON);
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_TYPE:
+		if (!state) {
+			val->intval = POWER_SUPPLY_CHARGE_TYPE_NONE;
+			return 0;
+		}
+		ret = max8998_read_reg(i2c, MAX8998_REG_STATUS2, &reg);
+		if (ret)
+			return ret;
+		if (reg & MAX8998_MASK_CHGON) {
+			if (reg & MAX8998_MASK_FCHG)
+				val->intval = POWER_SUPPLY_CHARGE_TYPE_FAST;
+			else
+				val->intval = POWER_SUPPLY_CHARGE_TYPE_TRICKLE;
+		} else
+			val->intval = POWER_SUPPLY_CHARGE_TYPE_NONE;
 		break;
 	default:
 		return -EINVAL;
 	}
 
 	return 0;
+}
+
+static void switch_handler_ac(struct switch_handler *handler, unsigned state)
+{
+	struct max8998_battery_data *max8998 =
+			(struct max8998_battery_data *)handler->data;
+
+	max8998->state_ac = state;
+	power_supply_changed(&max8998->psy_ac);
+}
+
+static void switch_handler_usb(struct switch_handler *handler, unsigned state)
+{
+	struct max8998_battery_data *max8998 =
+			(struct max8998_battery_data *)handler->data;
+
+	max8998->state_usb = state;
+	power_supply_changed(&max8998->psy_usb);
 }
 
 static __devinit int max8998_battery_probe(struct platform_device *pdev)
@@ -161,19 +215,64 @@ static __devinit int max8998_battery_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	max8998->battery.name = "max8998_pmic";
-	max8998->battery.type = POWER_SUPPLY_TYPE_BATTERY;
-	max8998->battery.get_property = max8998_battery_get_property;
-	max8998->battery.properties = max8998_battery_props;
-	max8998->battery.num_properties = ARRAY_SIZE(max8998_battery_props);
+	max8998->psy_ac.name = "max8998_ac";
+	max8998->psy_ac.type = POWER_SUPPLY_TYPE_MAINS;
+	max8998->psy_ac.get_property = max8998_psy_get_property;
+	max8998->psy_ac.properties = max8998_psy_props;
+	max8998->psy_ac.num_properties = ARRAY_SIZE(max8998_psy_props);
 
-	ret = power_supply_register(max8998->dev, &max8998->battery);
+	ret = power_supply_register(max8998->dev, &max8998->psy_ac);
 	if (ret) {
-		dev_err(max8998->dev, "failed: power supply register\n");
+		dev_err(max8998->dev, "failed: power supply register: ac\n");
 		goto err;
 	}
 
+	max8998->psy_usb.name = "max8998_usb";
+	max8998->psy_usb.type = POWER_SUPPLY_TYPE_USB;
+	max8998->psy_usb.get_property = max8998_psy_get_property;
+	max8998->psy_usb.properties = max8998_psy_props;
+	max8998->psy_usb.num_properties = ARRAY_SIZE(max8998_psy_props);
+
+	ret = power_supply_register(max8998->dev, &max8998->psy_usb);
+	if (ret) {
+		dev_err(max8998->dev, "failed: power supply register: usb\n");
+		goto err_psy;
+	}
+	
+	max8998->sw_ac.dev = "fsa9480";
+	max8998->sw_ac.attr_id = FSA9480_SWITCH_CHARGER;
+	max8998->sw_ac.data = max8998;
+	max8998->sw_ac.func = switch_handler_ac;
+	if (switch_handler_register(&max8998->sw_ac)) {
+		dev_err(max8998->dev, "failed: switch handler: ac\n");
+		goto err_psy;
+	}
+	
+	max8998->sw_usb.dev = "fsa9480";
+	max8998->sw_usb.attr_id = FSA9480_SWITCH_USB;
+	max8998->sw_usb.data = max8998;
+	max8998->sw_usb.func = switch_handler_usb;
+	if (switch_handler_register(&max8998->sw_usb)) {
+		dev_err(max8998->dev, "failed: switch handler: usb\n");
+		goto err_sw1;
+	}
+
+	max8998->sw_deskdock.dev = "fsa9480";
+	max8998->sw_deskdock.attr_id = FSA9480_SWITCH_USB;
+	max8998->sw_deskdock.data = max8998;
+	max8998->sw_deskdock.func = switch_handler_usb;
+	if (switch_handler_register(&max8998->sw_deskdock)) {
+		dev_err(max8998->dev, "failed: switch handler: deskdock\n");
+		goto err_sw2;
+	}
+
 	return 0;
+err_sw2:
+	switch_handler_remove(&max8998->sw_usb);
+err_sw1:
+	switch_handler_remove(&max8998->sw_ac);
+err_psy:
+	power_supply_unregister(&max8998->psy_ac);
 err:
 	kfree(max8998);
 	return ret;
@@ -183,7 +282,11 @@ static int __devexit max8998_battery_remove(struct platform_device *pdev)
 {
 	struct max8998_battery_data *max8998 = platform_get_drvdata(pdev);
 
-	power_supply_unregister(&max8998->battery);
+	switch_handler_remove(&max8998->sw_ac);
+	switch_handler_remove(&max8998->sw_usb);
+	switch_handler_remove(&max8998->sw_deskdock);
+	power_supply_unregister(&max8998->psy_ac);
+	power_supply_unregister(&max8998->psy_usb);
 	kfree(max8998);
 
 	return 0;
