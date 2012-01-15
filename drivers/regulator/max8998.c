@@ -168,6 +168,10 @@ static int max8998_get_enable_register(struct regulator_dev *rdev,
 		*reg = MAX8998_REG_CHGR2;
 		*shift = 7 - (ldo - MAX8998_ESAFEOUT1);
 		break;
+	case MAX8998_CHARGER:
+		*reg = MAX8998_REG_CHGR2;
+		*shift = 0;
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -191,6 +195,11 @@ static int max8998_ldo_is_enabled(struct regulator_dev *rdev)
 		return ret;
 
 	return val & (1 << shift);
+}
+
+static int max8998_ldo_is_enabled_inverted(struct regulator_dev *rdev)
+{
+	return (!max8998_ldo_is_enabled(rdev));
 }
 
 static int max8998_ldo_enable(struct regulator_dev *rdev)
@@ -532,6 +541,14 @@ static struct regulator_ops max8998_others_ops = {
 	.set_suspend_disable	= max8998_ldo_disable,
 };
 
+static struct regulator_ops max8998_invert_ops = {
+	.is_enabled		= max8998_ldo_is_enabled_inverted,
+	.enable			= max8998_ldo_disable,
+	.disable		= max8998_ldo_enable,
+	.set_suspend_enable	= max8998_ldo_disable,
+	.set_suspend_disable	= max8998_ldo_enable,
+};
+
 static struct regulator_desc regulators[] = {
 	{
 		.name		= "LDO2",
@@ -681,6 +698,12 @@ static struct regulator_desc regulators[] = {
 		.name		= "ESAFEOUT2",
 		.id		= MAX8998_ESAFEOUT2,
 		.ops		= &max8998_others_ops,
+		.type		= REGULATOR_VOLTAGE,
+		.owner		= THIS_MODULE,
+	}, {
+		.name		= "CHARGER",
+		.id		= MAX8998_CHARGER,
+		.ops		= &max8998_invert_ops,
 		.type		= REGULATOR_VOLTAGE,
 		.owner		= THIS_MODULE,
 	}
@@ -842,7 +865,8 @@ static __devinit int max8998_pmic_probe(struct platform_device *pdev)
 		int index = id - MAX8998_LDO2;
 
 		desc = ldo_voltage_map[id];
-		if (desc && regulators[index].ops != &max8998_others_ops) {
+		if (desc && regulators[index].ops != &max8998_others_ops &&
+		    regulators[index].ops != &max8998_invert_ops) {
 			int count = (desc->max - desc->min) / desc->step + 1;
 			regulators[index].n_voltages = count;
 		}
