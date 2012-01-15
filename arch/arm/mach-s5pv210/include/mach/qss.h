@@ -19,6 +19,7 @@ void qss_gpio_init(void) __init;
 void qss_fiqdbg_init(void) __init;
 void qss_input_init(void) __init;
 void qss_mfd_init(void) __init;
+void qss_power_init(void) __init;
 void qss_switch_init(void) __init;
 void qss_sdhci_init(void) __init;
 void qss_onenand_init(void) __init;

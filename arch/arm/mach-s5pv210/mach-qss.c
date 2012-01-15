@@ -82,6 +82,7 @@ static struct s3c2410_uartcfg qss_uartcfgs[] __initdata = {
 };
 
 static struct platform_device *qss_devices[] __initdata = {
+	&s3c_device_adc,
 	&s3c_device_rtc,
 	&s3c_device_wdt,
 	&s3c_device_usb_hsotg,
@@ -120,6 +121,9 @@ static void __init qss_machine_init(void)
 
 	/* MFD */
 	qss_mfd_init();
+
+	/* Power */
+	qss_power_init();
 
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
 
