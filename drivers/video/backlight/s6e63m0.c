@@ -905,10 +905,11 @@ static void s6e63m0_lateresume(struct early_suspend *h)
 	lcd->suspended = false;
 }
 #else
-static int s6e63m0_suspend(struct spi_device *spi, pm_message_t mesg)
+static int s6e63m0_suspend(struct device *dev)
 {
-	int ret = 0;
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct s6e63m0 *lcd = dev_get_drvdata(&spi->dev);
+	int ret;
 
 	dev_dbg(&spi->dev, "lcd->power = %d\n", lcd->power);
 
@@ -925,10 +926,11 @@ static int s6e63m0_suspend(struct spi_device *spi, pm_message_t mesg)
 	return ret;
 }
 
-static int s6e63m0_resume(struct spi_device *spi)
+static int s6e63m0_resume(struct device *dev)
 {
-	int ret = 0;
+	struct spi_device *spi = container_of(dev, struct spi_device, dev);
 	struct s6e63m0 *lcd = dev_get_drvdata(&spi->dev);
+	int ret;
 
 	/*
 	 * after suspended, if lcd panel status is FB_BLANK_UNBLANK
