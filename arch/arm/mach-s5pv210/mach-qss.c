@@ -144,7 +144,8 @@ static void __init qss_machine_init(void)
 
 	/* Media */
 	qss_media_init();
-	
+
+	/* Wifi */
 	qss_wifi_init();
 }
 
