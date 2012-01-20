@@ -197,6 +197,9 @@ static int wm8994_suspend(struct device *dev)
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
 	int ret;
 
+	if (wm8994->suspended)
+		return 0;
+
 	/* Don't actually go through with the suspend if the CODEC is
 	 * still active (eg, for audio passthrough from CP. */
 	ret = wm8994_reg_read(wm8994, WM8994_POWER_MANAGEMENT_1);
@@ -511,6 +514,8 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 			ret);
 		return ret;
 	}
+
+	regcache_cache_bypass(wm8994->regmap, false);
 
 	if (pdata) {
 		wm8994->irq_base = pdata->irq_base;
