@@ -133,9 +133,14 @@ enum s5p_gpio_number {
 #define S5PV210_GPIO_END	(S5PV210_MP05(S5PV210_GPIO_MP05_NR) + 1)
 #define S3C_GPIO_END		S5PV210_GPIO_END
 
-/* define the number of gpios we need to the one after the MP05() range */
-#define ARCH_NR_GPIOS		(S5PV210_MP05(S5PV210_GPIO_MP05_NR) +	\
+#define SAMSUNG_GPIO_NR		(S5PV210_MP05(S5PV210_GPIO_MP05_NR) +	\
 				 CONFIG_SAMSUNG_GPIO_EXTRA + 1)
+
+#define WM8994_GPIO_BASE	SAMSUNG_GPIO_NR
+#define WM8994_GPIO_NR		23
+
+/* define the number of gpios we need to the one after the MP05() range */
+#define ARCH_NR_GPIOS		(WM8994_GPIO_BASE + WM8994_GPIO_NR + 1)
 
 #ifdef CONFIG_MACH_QSS
 #include <mach/gpio-qss.h>

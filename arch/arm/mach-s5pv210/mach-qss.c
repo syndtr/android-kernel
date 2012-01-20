@@ -147,6 +147,9 @@ static void __init qss_machine_init(void)
 
 	/* Wifi */
 	qss_wifi_init();
+
+	/* Sound */
+	qss_sound_init();
 }
 
 MACHINE_START(QSS, "QSS")

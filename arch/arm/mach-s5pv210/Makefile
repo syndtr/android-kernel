@@ -33,7 +33,7 @@ obj-y				+= mach-qss.o qss-pm.o qss-gpio.o qss-pd.o
 obj-$(CONFIG_FIQ_DEBUGGER)	+= qss-fiqdbg.o
 obj-y				+= qss-input.o qss-mfd.o qss-power.o qss-switch.o
 obj-y				+= qss-sdhci.o qss-onenand.o qss-display.o qss-media.o
-obj-y				+= qss-wifi.o
+obj-y				+= qss-wifi.o qss-sound.o
 endif
 
 # device support

@@ -133,8 +133,13 @@
 #define MAX8998_EINT_BASE	S5P_NR_IRQS
 #define MAX8998_NR_IRQS		18
 
+/* WM8994 interrupt */
+#define WM8994_EINT_BASE	(MAX8998_EINT_BASE + MAX8998_NR_IRQS + 1)
+#define WM8994_NR_IRQS		27
+
+
 /* Set the default NR_IRQS */
-#define NR_IRQS			(MAX8998_EINT_BASE + MAX8998_NR_IRQS + 1)
+#define NR_IRQS			(WM8994_EINT_BASE + WM8994_NR_IRQS + 1)
 
 /* Compatibility */
 #define IRQ_LCD_FIFO		IRQ_LCD0

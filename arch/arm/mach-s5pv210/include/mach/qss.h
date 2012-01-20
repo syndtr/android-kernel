@@ -26,6 +26,7 @@ void qss_onenand_init(void) __init;
 void qss_display_init(void) __init;
 void qss_media_init(void) __init;
 void qss_wifi_init(void) __init;
+void qss_sound_init(void) __init;
 
 void qss_restart(char mode, const char *cmd);
 
