@@ -31,7 +31,7 @@
 	static struct i2c_gpio_platform_data i2c##ID##_pdata = {	\
 		.sda_pin                = GPIO_I2C##ID##_SDA,		\
 		.scl_pin                = GPIO_I2C##ID##_SCL,		\
-		.udelay                 = 2,    /* 250KHz */		\
+		.udelay                 = GPIO_I2C##ID##_UDELAY,	\
 		.sda_is_open_drain      = 0,				\
 		.scl_is_open_drain      = 0,				\
 		.scl_is_output_only     = 0,				\
@@ -50,49 +50,85 @@
 	}
 
 #if HAS_I2C(3)
+#ifndef GPIO_I2C3_UDELAY
+#define GPIO_I2C3_UDELAY 2
+#endif
 DEFINE_I2C(3)
 #endif
 
 #if HAS_I2C(4)
+#ifndef GPIO_I2C4_UDELAY
+#define GPIO_I2C4_UDELAY 2
+#endif
 DEFINE_I2C(4)
 #endif
 
 #if HAS_I2C(5)
+#ifndef GPIO_I2C5_UDELAY
+#define GPIO_I2C5_UDELAY 2
+#endif
 DEFINE_I2C(5)
 #endif
 
 #if HAS_I2C(6)
+#ifndef GPIO_I2C6_UDELAY
+#define GPIO_I2C6_UDELAY 2
+#endif
 DEFINE_I2C(6)
 #endif
 
 #if HAS_I2C(7)
+#ifndef GPIO_I2C7_UDELAY
+#define GPIO_I2C7_UDELAY 2
+#endif
 DEFINE_I2C(7)
 #endif
 
 #if HAS_I2C(8)
+#ifndef GPIO_I2C8_UDELAY
+#define GPIO_I2C8_UDELAY 2
+#endif
 DEFINE_I2C(8)
 #endif
 
 #if HAS_I2C(9)
+#ifndef GPIO_I2C9_UDELAY
+#define GPIO_I2C9_UDELAY 2
+#endif
 DEFINE_I2C(9)
 #endif
 
 #if HAS_I2C(10)
+#ifndef GPIO_I2C10_UDELAY
+#define GPIO_I2C10_UDELAY 2
+#endif
 DEFINE_I2C(10)
 #endif
 
 #if HAS_I2C(11)
+#ifndef GPIO_I2C11_UDELAY
+#define GPIO_I2C11_UDELAY 2
+#endif
 DEFINE_I2C(11)
 #endif
 
 #if HAS_I2C(12)
+#ifndef GPIO_I2C12_UDELAY
+#define GPIO_I2C12_UDELAY 2
+#endif
 DEFINE_I2C(12)
 #endif
 
 #if HAS_I2C(13)
+#ifndef GPIO_I2C13_UDELAY
+#define GPIO_I2C13_UDELAY 2
+#endif
 DEFINE_I2C(13)
 #endif
 
 #if HAS_I2C(14)
+#ifndef GPIO_I2C14_UDELAY
+#define GPIO_I2C14_UDELAY 2
+#endif
 DEFINE_I2C(14)
 #endif
