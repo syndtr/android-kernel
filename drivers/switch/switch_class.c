@@ -146,7 +146,7 @@ static DEVICE_ATTR(name, S_IRUGO | S_IWUSR, name_show, NULL);
 
 static int _switch_set_state(struct switch_attr *attr, unsigned state)
 {
-	if (state >= attr->states_nr)
+	if (!attr->sdev || (attr->states_nr && state >= attr->states_nr))
 		return -EINVAL;
 
 	if (attr->state != state || attr->flags & SWITCH_ATTR_IGNSTATE) {
@@ -167,7 +167,6 @@ static void _switch_set_state_wq(struct work_struct *work)
 	char *envp[4];
 	int env_offset = 0;
 	char *prop_buf;
-	int length = -1;
 
 	if (attr->state == attr->newstate)
 		return;
@@ -184,21 +183,22 @@ static void _switch_set_state_wq(struct work_struct *work)
 		if (sdev->print_name) {
 			prop_buf = (char *)get_zeroed_page(GFP_KERNEL);
 			if (prop_buf) {
-				length = sdev->print_name(sdev, prop_buf);
-				if (length <= 0) {
+				int ret = sdev->print_name(sdev, prop_buf);
+				if (ret <= 0) {
 					free_page((unsigned long)prop_buf);
-					prop_buf = (char *)sdev->name;
+					return;
 				} else {
-					if (prop_buf[length - 1] == '\n')
-						prop_buf[length - 1] = 0;
+					if (prop_buf[ret - 1] == '\n')
+						prop_buf[ret - 1] = 0;
 				}
 			} else {
 				printk(KERN_ERR "switch: out of memory in switch_set_state\n");
 				kobject_uevent(&sdev->dev->kobj, KOBJ_CHANGE);
+				return;
 			}
 		} else
 			prop_buf = (char *)sdev->name;
-		if (prop_buf && length < 0) {
+		if (prop_buf) {
 			snprintf(name_buf, sizeof(name_buf),
 				"SWITCH_NAME=%s", prop_buf);
 			envp[env_offset++] = name_buf;
@@ -206,8 +206,12 @@ static void _switch_set_state_wq(struct work_struct *work)
 		snprintf(attr_buf, sizeof(attr_buf),
 			"SWITCH_ATTR=%s", attr->name);
 		envp[env_offset++] = attr_buf;
-		snprintf(state_buf, sizeof(state_buf),
-			"SWITCH_STATE=%s", attr->states[attr->state]);
+		if (attr->states_nr && attr->state < attr->states_nr)
+			snprintf(state_buf, sizeof(state_buf),
+				"SWITCH_STATE=%s", attr->states[attr->state]);
+		else
+			snprintf(state_buf, sizeof(state_buf),
+				"SWITCH_STATE=%u", attr->state);
 		envp[env_offset++] = state_buf;
 		envp[env_offset] = NULL;
 		kobject_uevent_env(&sdev->dev->kobj, KOBJ_CHANGE, envp);
@@ -245,7 +249,9 @@ static ssize_t switch_show(struct device *dev, struct device_attribute *dev_attr
 			state = _switch_get_state(sdev, attr);
 			if (state < 0)
 				return state;
-			if (state >= attr->states_nr)
+			if (!attr->states_nr)
+				return sprintf(buf, "%d\n", state);
+			else if (state >= attr->states_nr)
 				return sprintf(buf, "unknown [%x]\n", state);
 			return sprintf(buf, "%s\n", attr->states[state]);
 		}
@@ -271,10 +277,17 @@ static ssize_t switch_store(struct device *dev, struct device_attribute *dev_att
 	return -EINVAL;
 
 attr_found:
-	for (i = 0; i < attr->states_nr; i++)
-		if (!strncmp(attr->states[i], buf, strlen(attr->states[i]))) {
-			return _switch_set_state(attr, i);
-		}
+	if (attr->states_nr) {
+		for (i = 0; i < attr->states_nr; i++)
+			if (!strncmp(attr->states[i], buf, strlen(attr->states[i]))) {
+				if (!_switch_set_state(attr, i))
+					return count;
+			}
+	} else {
+		if (!kstrtouint(buf, 10, &i))
+			if (!_switch_set_state(attr, i))
+				return count;
+	}
 
 	return -EINVAL;
 }
