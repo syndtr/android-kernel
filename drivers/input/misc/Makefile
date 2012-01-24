@@ -57,3 +57,4 @@ obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_KR3DH)		+= kr3dh.o
 obj-$(CONFIG_INPUT_YAS529)		+= yas529.o
 obj-$(CONFIG_INPUT_ORIENTATION)		+= orientation.o
+obj-$(CONFIG_INPUT_SAMSUNG_JACK)	+= sec_jack.o
