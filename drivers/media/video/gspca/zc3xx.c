@@ -46,6 +46,7 @@ enum e_ctrl {
 	AUTOGAIN,
 	LIGHTFREQ,
 	SHARPNESS,
+	QUALITY,
 	NCTRLS		/* number of controls */
 };
 
@@ -56,11 +57,6 @@ struct sd {
 	struct gspca_dev gspca_dev;	/* !! must be the first item */
 
 	struct gspca_ctrl ctrls[NCTRLS];
-
-	u8 quality;			/* image quality */
-#define QUALITY_MIN 50
-#define QUALITY_MAX 80
-#define QUALITY_DEF 70
 
 	u8 bridge;
 	u8 sensor;		/* Type of image sensor chip */
@@ -101,6 +97,12 @@ static void setexposure(struct gspca_dev *gspca_dev);
 static int sd_setautogain(struct gspca_dev *gspca_dev, __s32 val);
 static void setlightfreq(struct gspca_dev *gspca_dev);
 static void setsharpness(struct gspca_dev *gspca_dev);
+static void set_quality(struct gspca_dev *gspca_dev);
+
+/* JPEG image quality */
+#define QUALITY_MIN 50
+#define QUALITY_MAX 80
+#define QUALITY_DEF 70
 
 static const struct ctrl sd_ctrls[NCTRLS] = {
 [BRIGHTNESS] = {
@@ -187,6 +189,18 @@ static const struct ctrl sd_ctrls[NCTRLS] = {
 		.default_value = 2,
 	    },
 	    .set_control = setsharpness
+	},
+[QUALITY] = {
+	    {
+		.id	 = V4L2_CID_JPEG_COMPRESSION_QUALITY,
+		.type    = V4L2_CTRL_TYPE_INTEGER,
+		.name    = "Compression Quality",
+		.minimum = QUALITY_MIN,
+		.maximum = QUALITY_MAX,
+		.step    = 1,
+		.default_value = QUALITY_DEF,
+	    },
+	    .set_control = set_quality
 	},
 };
 
@@ -6411,7 +6425,6 @@ static int sd_config(struct gspca_dev *gspca_dev,
 	sd->sensor = id->driver_info;
 
 	gspca_dev->cam.ctrls = sd->ctrls;
-	sd->quality = QUALITY_DEF;
 
 	return 0;
 }
@@ -6685,7 +6698,7 @@ static int sd_start(struct gspca_dev *gspca_dev)
 	/* create the JPEG header */
 	jpeg_define(sd->jpeg_hdr, gspca_dev->height, gspca_dev->width,
 			0x21);		/* JPEG 422 */
-	jpeg_set_qual(sd->jpeg_hdr, sd->quality);
+	jpeg_set_qual(sd->jpeg_hdr, sd->ctrls[QUALITY].val);
 
 	mode = gspca_dev->cam.cam_mode[gspca_dev->curr_mode].priv;
 	switch (sd->sensor) {
@@ -6893,17 +6906,19 @@ static int sd_querymenu(struct gspca_dev *gspca_dev,
 	return -EINVAL;
 }
 
+static void set_quality(struct gspca_dev *gspca_dev)
+{
+	struct sd *sd = (struct sd *) gspca_dev;
+	jpeg_set_qual(sd->jpeg_hdr, sd->ctrls[QUALITY].val);
+}
+
 static int sd_set_jcomp(struct gspca_dev *gspca_dev,
 			struct v4l2_jpegcompression *jcomp)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 
-	if (jcomp->quality < QUALITY_MIN)
-		sd->quality = QUALITY_MIN;
-	else if (jcomp->quality > QUALITY_MAX)
-		sd->quality = QUALITY_MAX;
-	else
-		sd->quality = jcomp->quality;
+	sd->ctrls[QUALITY].val = clamp_t(u8, jcomp->quality,
+					 QUALITY_MIN, QUALITY_MAX);
 	if (gspca_dev->streaming)
 		jpeg_set_qual(sd->jpeg_hdr, sd->quality);
 	return gspca_dev->usb_err;
@@ -6915,7 +6930,7 @@ static int sd_get_jcomp(struct gspca_dev *gspca_dev,
 	struct sd *sd = (struct sd *) gspca_dev;
 
 	memset(jcomp, 0, sizeof *jcomp);
-	jcomp->quality = sd->quality;
+	jcomp->quality = sd->ctrls[QUALITY].val;
 	jcomp->jpeg_markers = V4L2_JPEG_MARKER_DHT
 			| V4L2_JPEG_MARKER_DQT;
 	return 0;
