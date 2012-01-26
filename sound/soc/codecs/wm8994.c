@@ -2710,7 +2710,7 @@ static int wm8994_suspend(struct snd_soc_codec *codec)
 {
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	struct wm8994 *control = wm8994->wm8994;
-	int i, ret, reg_offset = 0;
+	int i, reg_offset = 0;
 	bool was_enabled;
 	u16 reg;
 
@@ -2794,7 +2794,7 @@ static int wm8994_resume(struct snd_soc_codec *codec)
 {
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	struct wm8994 *control = wm8994->wm8994;
-	int i, ret;
+	int ret;
 	unsigned int val, mask;
 
 	if (wm8994->revision < 4) {
