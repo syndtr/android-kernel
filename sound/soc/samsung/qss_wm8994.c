@@ -14,8 +14,6 @@
 #include <sound/soc.h>
 #include <sound/jack.h>
 #include <sound/pcm_params.h>
-#include <linux/switch.h>
-#include <linux/input/sec_jack.h>
 
 #include <asm/mach-types.h>
 
@@ -64,20 +62,6 @@ static const struct snd_soc_dapm_route qss_dapm_routes[] = {
 	{"IN1LN", NULL, "Main Mic"},
 	{"IN1LP", NULL, "Main Mic"},
 };
-
-static void jack_switch_cb(struct switch_handler *handler, unsigned state)
-{
-	int report = 0;
-
-	if (state & SEC_HEADSET_4POLE)
-		report |= SND_JACK_HEADSET;
-	else if (state & SEC_HEADSET_3POLE)
-		report |= SND_JACK_HEADPHONE;
-
-	snd_soc_jack_report(&jack, report, SND_JACK_HEADSET);
-}
-
-static DEFINE_SWITCH_HANDLER(jack_switch, "h2w", JACK_SWITCH_STATE, jack_switch_cb, NULL);
 
 /*
  * Headset Stereophone:
@@ -151,9 +135,7 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret)
 		return ret;
 
-	ret = switch_handler_register(&jack_switch);
-	if (ret)
-		return ret;
+	snd_soc_jack_report(&jack, SND_JACK_HEADSET, SND_JACK_HEADSET);
 
 	return 0;
 }
