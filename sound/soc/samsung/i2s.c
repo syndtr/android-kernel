@@ -16,6 +16,7 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/regulator/consumer.h>
 
 #include <sound/soc.h>
 #include <sound/pcm_params.h>
@@ -47,6 +48,8 @@ struct i2s_dai {
 	unsigned rfs, bfs;
 	/* I2S Controller's core clock */
 	struct clk *clk;
+	/* I2S Controller's power domain */
+	struct regulator *pd;
 	/* Clock for generating I2S signals */
 	struct clk *op_clk;
 	/* Array of clock names for op_clk */
@@ -831,6 +834,9 @@ static int i2s_suspend(struct snd_soc_dai *dai)
 		i2s->suspend_i2spsr = readl(i2s->addr + I2SPSR);
 	}
 
+	if (i2s->quirks & QUIRK_NEED_RSTCLR)
+		writel(0, i2s->addr + I2SCON);
+
 	return 0;
 }
 
@@ -838,6 +844,9 @@ static int i2s_resume(struct snd_soc_dai *dai)
 {
 	struct i2s_dai *i2s = to_info(dai);
 
+	if (i2s->quirks & QUIRK_NEED_RSTCLR)
+		writel(CON_RSTCLR, i2s->addr + I2SCON);
+	
 	if (dai->active) {
 		writel(i2s->suspend_i2scon, i2s->addr + I2SCON);
 		writel(i2s->suspend_i2smod, i2s->addr + I2SMOD);
@@ -864,6 +873,13 @@ static int samsung_i2s_dai_probe(struct snd_soc_dai *dai)
 		dev_err(&i2s->pdev->dev, "cannot ioremap registers\n");
 		return -ENXIO;
 	}
+
+	i2s->pd = regulator_get(&i2s->pdev->dev, "pd-audio");
+	if (IS_ERR(i2s->pd)) {
+		dev_err(&i2s->pdev->dev, "failed to get i2s pd\n");
+		return PTR_ERR(i2s->pd);
+	}
+	regulator_enable(i2s->pd);
 
 	i2s->clk = clk_get(&i2s->pdev->dev, "iis");
 	if (IS_ERR(i2s->clk)) {
@@ -1096,8 +1112,6 @@ static __devinit int samsung_i2s_probe(struct platform_device *pdev)
 
 	snd_soc_register_dai(&pri_dai->pdev->dev, &pri_dai->i2s_dai_drv);
 
-	pm_runtime_enable(&pdev->dev);
-
 	return 0;
 err:
 	release_mem_region(regs_base, resource_size(res));
@@ -1117,7 +1131,6 @@ static __devexit int samsung_i2s_remove(struct platform_device *pdev)
 		other->pri_dai = NULL;
 		other->sec_dai = NULL;
 	} else {
-		pm_runtime_disable(&pdev->dev);
 		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 		if (res)
 			release_mem_region(res->start, resource_size(res));
