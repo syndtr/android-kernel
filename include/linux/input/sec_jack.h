@@ -30,6 +30,10 @@ enum {
 	SEC_UNKNOWN_DEVICE		= 0x01 << 8,
 };
 
+enum {
+	JACK_SWITCH_STATE,
+};
+
 struct sec_jack_zone {
 	unsigned int adc_high;
 	unsigned int delay_ms;

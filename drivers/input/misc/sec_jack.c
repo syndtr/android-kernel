@@ -65,10 +65,6 @@ struct sec_jack_info {
  */
 static atomic_t instantiated = ATOMIC_INIT(0);
 
-enum {
-	JACK_SWITCH_STATE
-};
-
 struct switch_attr jack_switch_attrs[] = {
 	[JACK_SWITCH_STATE] = {
 		.name	= "state",
