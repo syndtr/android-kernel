@@ -2071,6 +2071,9 @@ static int wm8994_set_bias_level(struct snd_soc_codec *codec,
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	struct wm8994 *control = wm8994->wm8994;
 
+	if (wm8994->pdata->set_bias_level)
+		wm8994->pdata->set_bias_level(level);
+
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 		break;
