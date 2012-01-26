@@ -70,7 +70,7 @@ struct wm8994_priv {
 	int sysclk_rate[2];
 	int mclk[2];
 	int aifclk[2];
-	struct wm8994_fll_config fll[2], fll_suspend[2];
+	struct wm8994_fll_config fll[2];
 	struct completion fll_locked[2];
 	bool fll_locked_irq;
 
@@ -142,6 +142,8 @@ struct wm8994_priv {
 	const struct firmware *mbc;
 	const struct firmware *mbc_vss;
 	const struct firmware *enh_eq;
+
+	u16 sleep_aif1, sleep_aif2;
 };
 
 #endif

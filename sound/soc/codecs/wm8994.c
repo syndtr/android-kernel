@@ -1822,6 +1822,12 @@ static int _wm8994_set_fll(struct snd_soc_codec *codec, int id, int src,
 	aif2 = snd_soc_read(codec, WM8994_AIF2_CLOCKING_1)
 		& WM8994_AIF2CLK_ENA;
 
+	aif1 |= wm8994->sleep_aif1;
+	aif2 |= wm8994->sleep_aif2;
+
+	wm8994->sleep_aif1 = 0;
+	wm8994->sleep_aif2 = 0;
+
 	switch (id) {
 	case WM8994_FLL1:
 		reg_offset = 0;
@@ -2701,7 +2707,12 @@ static int wm8994_suspend(struct snd_soc_codec *codec)
 {
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	struct wm8994 *control = wm8994->wm8994;
-	int i, ret;
+	int i, ret, reg_offset = 0;
+	bool was_enabled;
+	u16 reg;
+
+	reg = snd_soc_read(codec, WM8994_FLL1_CONTROL_1 + reg_offset);
+	was_enabled = reg & WM8994_FLL1_ENA;
 
 	switch (control->type) {
 	case WM8994:
@@ -2717,14 +2728,59 @@ static int wm8994_suspend(struct snd_soc_codec *codec)
 		break;
 	}
 
+	wm8994->sleep_aif1 = snd_soc_read(codec, WM8994_AIF1_CLOCKING_1)
+		& WM8994_AIF1CLK_ENA;
+
+	wm8994->sleep_aif2 = snd_soc_read(codec, WM8994_AIF2_CLOCKING_1)
+		& WM8994_AIF2CLK_ENA;
+
+	/* Gate the AIF clocks */
+	snd_soc_update_bits(codec, WM8994_AIF1_CLOCKING_1,
+			    WM8994_AIF1CLK_ENA, 0);
+	snd_soc_update_bits(codec, WM8994_AIF2_CLOCKING_1,
+			    WM8994_AIF2CLK_ENA, 0);
+
 	for (i = 0; i < ARRAY_SIZE(wm8994->fll); i++) {
-		memcpy(&wm8994->fll_suspend[i], &wm8994->fll[i],
-		       sizeof(struct wm8994_fll_config));
-		ret = _wm8994_set_fll(codec, i + 1, 0, 0, 0);
-		if (ret < 0)
-			dev_warn(codec->dev, "Failed to stop FLL%d: %d\n",
-				 i + 1, ret);
+		switch (i) {
+		case 0:
+			reg_offset = 0;
+			break;
+		case 1:
+			reg_offset = 0x20;
+			break;
+		default:
+			continue;
+		}
+
+		/* clear all FLL registers */
+		snd_soc_write(codec, WM8994_FLL1_CONTROL_1 + reg_offset, 0);
+		snd_soc_write(codec, WM8994_FLL1_CONTROL_2 + reg_offset, 0);
+		snd_soc_write(codec, WM8994_FLL1_CONTROL_3 + reg_offset, 0);
+		snd_soc_write(codec, WM8994_FLL1_CONTROL_4 + reg_offset, 0);
+		snd_soc_write(codec, WM8994_FLL1_CONTROL_5 + reg_offset, 0);
+
+		wm8994->fll[i].src = 0;
+		wm8994->fll[i].in = 0;
+		wm8994->fll[i].out = 0;
 	}
+
+	if (was_enabled) {
+		switch (control->type) {
+		case WM8994:
+			vmid_dereference(codec);
+			break;
+		case WM8958:
+			if (wm8994->revision < 1)
+				vmid_dereference(codec);
+			break;
+		default:
+			break;
+		}
+
+		active_dereference(codec);
+	}
+
+	configure_clock(codec);
 
 	wm8994_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
@@ -2740,8 +2796,10 @@ static int wm8994_resume(struct snd_soc_codec *codec)
 
 	if (wm8994->revision < 4) {
 		/* force a HW read */
+		regcache_cache_bypass(control->regmap, true);
 		ret = regmap_read(control->regmap,
 				  WM8994_POWER_MANAGEMENT_5, &val);
+		regcache_cache_bypass(control->regmap, false);
 
 		/* modify the cache only */
 		codec->cache_only = 1;
@@ -2753,25 +2811,7 @@ static int wm8994_resume(struct snd_soc_codec *codec)
 		codec->cache_only = 0;
 	}
 
-	/* Restore the registers */
-	ret = snd_soc_cache_sync(codec);
-	if (ret != 0)
-		dev_err(codec->dev, "Failed to sync cache: %d\n", ret);
-
 	wm8994_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
-
-	for (i = 0; i < ARRAY_SIZE(wm8994->fll); i++) {
-		if (!wm8994->fll_suspend[i].out)
-			continue;
-
-		ret = _wm8994_set_fll(codec, i + 1,
-				     wm8994->fll_suspend[i].src,
-				     wm8994->fll_suspend[i].in,
-				     wm8994->fll_suspend[i].out);
-		if (ret < 0)
-			dev_warn(codec->dev, "Failed to restore FLL%d: %d\n",
-				 i + 1, ret);
-	}
 
 	switch (control->type) {
 	case WM8994:
@@ -3387,9 +3427,6 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		wm8994->micdet_irq = wm8994->pdata->irq_base +
 				     WM8994_IRQ_MIC1_DET;
 
-	pm_runtime_enable(codec->dev);
-	pm_runtime_resume(codec->dev);
-
 	/* Set revision-specific configuration */
 	wm8994->revision = snd_soc_read(codec, WM8994_CHIP_REVISION);
 	switch (control->type) {
@@ -3760,6 +3797,8 @@ err_irq:
 	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_SHUT, codec);
 	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_WARN, codec);
 
+	kfree(wm8994);
+
 	return ret;
 }
 
@@ -3770,8 +3809,6 @@ static int  wm8994_codec_remove(struct snd_soc_codec *codec)
 	int i;
 
 	wm8994_set_bias_level(codec, SND_SOC_BIAS_OFF);
-
-	pm_runtime_disable(codec->dev);
 
 	for (i = 0; i < ARRAY_SIZE(wm8994->fll_locked); i++)
 		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_FLL1_LOCK + i,
@@ -3827,7 +3864,8 @@ static struct snd_soc_codec_driver soc_codec_dev_wm8994 = {
 	.suspend =	wm8994_suspend,
 	.resume =	wm8994_resume,
 	.set_bias_level = wm8994_set_bias_level,
-	.reg_cache_size	= WM8994_MAX_REGISTER,
+	.reg_cache_size	= WM8994_MAX_CACHED_REGISTER,
+	.reg_word_size = sizeof(u16),
 	.volatile_register = wm8994_soc_volatile,
 };
 
