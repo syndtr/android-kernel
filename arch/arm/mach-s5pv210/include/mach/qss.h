@@ -28,6 +28,10 @@ void qss_media_init(void) __init;
 void qss_wifi_init(void) __init;
 void qss_sound_init(void) __init;
 
+/* pm */
 void qss_restart(char mode, const char *cmd);
+
+/* hw rev */
+extern int qss_hwrev(void);
 
 #endif

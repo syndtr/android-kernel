@@ -13,6 +13,7 @@
 #include <linux/init.h>
 #include <linux/serial_core.h>
 #include <linux/sysdev.h>
+#include <linux/gpio.h>
 
 #include <asm/hardware/vic.h>
 #include <asm/mach/arch.h>
@@ -22,11 +23,13 @@
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
+#include <mach/gpio.h>
 
 #include <plat/regs-serial.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
 #include <plat/s5p-time.h>
+#include <plat/gpio-cfg.h>
 
 #include <mach/qss.h>
 
@@ -106,8 +109,32 @@ static void __init qss_map_io(void)
 	s5p_set_timer_source(S5P_PWM3, S5P_PWM4);
 }
 
+static int __hwrev = 0;
+static void __init qss_hwrev_init(void)
+{
+	int i;
+
+	s3c_gpio_cfgrange_nopull(GPIO_HWREV_MODE0, 3, S3C_GPIO_INPUT);
+	for (i = 0; i < 3; i++) {
+		__hwrev |= (gpio_get_value(GPIO_HWREV_MODE0 + i) << i);
+	}
+
+	s3c_gpio_cfgrange_nopull(GPIO_HWREV_MODE3, 1, S3C_GPIO_INPUT);
+	__hwrev |= (gpio_get_value(GPIO_HWREV_MODE3) << i);
+
+	printk("QSS HW Rev: %d\n", __hwrev);
+}
+
+int qss_hwrev(void)
+{
+	return __hwrev;
+}
+
 static void __init qss_machine_init(void)
 {
+	/* get hw rev */
+	qss_hwrev_init();
+
 	/* initialize pm */
 	qss_pm_init();
 
