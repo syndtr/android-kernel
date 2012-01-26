@@ -34,4 +34,8 @@ void qss_restart(char mode, const char *cmd);
 /* hw rev */
 extern int qss_hwrev(void);
 
+/* sound */
+extern void qss_set_micbias_main(bool state);
+extern void qss_set_micbias_ear(bool state);
+
 #endif

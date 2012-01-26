@@ -14,6 +14,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/regulator/fixed.h>
 #include <linux/gpio.h>
+#include <sound/soc.h>
 
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
@@ -23,6 +24,7 @@
 #include <mach/map.h>
 #include <mach/regs-clock.h>
 #include <mach/regs-gpio.h>
+#include <mach/qss-pd.h>
 
 #include <plat/devs.h>
 #include <plat/iic.h>
@@ -30,6 +32,69 @@
 #include <plat/clock.h>
 
 #include <mach/qss.h>
+
+enum {
+	MICBIAS_TYPE_MAIN	= (1 << 0),
+	MICBIAS_TYPE_EAR	= (1 << 1),
+};
+
+static void qss_set_micbias(int type, bool state)
+{
+	static bool initialized;
+	static int shared_en;
+	int gpio = GPIO_MICBIAS_EN;
+
+	if (!initialized) {
+		gpio_request(GPIO_MICBIAS_EN, "MICBIAS_EN");
+		gpio_direction_output(GPIO_MICBIAS_EN, 0);
+	}
+
+	if (qss_hwrev() < 0x9) {
+		if (state)
+			shared_en |= type;
+		else
+			shared_en &= ~type;
+
+		state = !!shared_en;
+	} else {
+		if (!initialized) {
+			gpio_request(GPIO_MICBIAS_EAR_EN, "MICBIAS_EAR_EN");
+			gpio_direction_output(GPIO_MICBIAS_EAR_EN, 0);
+		}
+
+		if (type == MICBIAS_TYPE_EAR)
+			gpio = GPIO_MICBIAS_EAR_EN;
+	}
+
+	if (!initialized)
+		initialized = true;
+
+	gpio_set_value(gpio, state);
+}
+
+void qss_set_micbias_main(bool state)
+{
+	qss_set_micbias(MICBIAS_TYPE_MAIN, state);
+}
+
+void qss_set_micbias_ear(bool state)
+{
+	qss_set_micbias(MICBIAS_TYPE_EAR, state);
+}
+
+void wm8994_set_bias_level(enum snd_soc_bias_level level)
+{
+	switch(level) {
+	case SND_SOC_BIAS_ON:
+		qss_set_micbias_main(true);
+		break;
+	case SND_SOC_BIAS_OFF:
+		qss_set_micbias_main(false);
+		break;
+	default:
+		break;
+	}
+}
 
 static struct regulator_consumer_supply wm8994_fixed_voltage0_supplies[] = {
 	REGULATOR_SUPPLY("DBVDD", "4-001a"),
@@ -126,7 +191,8 @@ static struct wm8994_pdata wm8994_pdata = {
 	.gpio_defaults[10]	= 0x0100,
 	.gpio_base		= WM8994_GPIO_BASE,
 	.irq_base		= WM8994_EINT_BASE,
-	.ldo[0]	= { S5PV210_GPF3(4),	NULL,	&wm8994_ldo1_data },	/* XM0FRNB_2 */
+	.set_bias_level		= wm8994_set_bias_level,
+	.ldo[0]	= { GPIO_CODEC_LDO_EN,	NULL,	&wm8994_ldo1_data },	/* XM0FRNB_2 */
 	.ldo[1]	= { 0,			NULL,	&wm8994_ldo2_data },
 };
 
@@ -138,32 +204,37 @@ static struct i2c_board_info i2c4_devs[] __initdata = {
 	},
 };
 
-static struct platform_device qss_pcm = {
-	.name		= "samsung-qss-pcm",
-	.id		= -1,
-};
-
-
 static struct platform_device *qss_devices[] __initdata = {
 	&s3c_device_i2c4,
-	&s5pv210_device_iis0,
+	&samsung_asoc_dma,
 	&samsung_asoc_idma,
+	&s5pv210_device_iis0,
 	&wm8994_fixed_voltage0,
 	&wm8994_fixed_voltage1,
-	&qss_pcm,
+	&s5pv210_pd_audio,
 };
-
 
 void __init qss_sound_init(void)
 {
-	s3c_gpio_cfgrange_nopull(S5PV210_GPH0(1), 1, EINT_MODE);
-	i2c4_devs[0].irq = gpio_to_irq(S5PV210_GPH0(1));
-	
 	/* Ths main clock of WM8994 codec uses the output of CLKOUT pin.
 	 * The CLKOUT[9:8] set to 0x3(XUSBXTI) of 0xE010E000(OTHERS)
 	 * because it needs 24MHz clock to operate WM8994 codec.
 	 */
 	__raw_writel(__raw_readl(S5P_OTHERS) | (0x3 << 8), S5P_OTHERS);
+
+	/* codec ldo */
+	s3c_gpio_cfgrange_nopull(GPIO_CODEC_LDO_EN, 1, S3C_GPIO_OUTPUT);
+	s3c_gpio_slp_cfgpin(GPIO_CODEC_LDO_EN, S3C_GPIO_SLP_PREV);
+	s3c_gpio_slp_setpull(GPIO_CODEC_LDO_EN, S3C_GPIO_SLP_PULL_NONE);
+	gpio_set_value(GPIO_CODEC_LDO_EN, 0);
+
+	/* mic bias */
+	s3c_gpio_cfgrange_nopull(GPIO_MICBIAS_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_MICBIAS_EN, 0);
+	if (qss_hwrev() >= 0x9) {
+		s3c_gpio_cfgrange_nopull(GPIO_MICBIAS_EAR_EN, 1, S3C_GPIO_OUTPUT);
+		gpio_set_value(GPIO_MICBIAS_EAR_EN, 0);
+	}
 
 	/* i2c gpio cfg */
 	s3c_i2c4_cfg_gpio(&s3c_device_i2c4);
