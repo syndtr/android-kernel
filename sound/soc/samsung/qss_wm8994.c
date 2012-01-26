@@ -13,9 +13,11 @@
 #include <linux/module.h>
 #include <sound/soc.h>
 #include <sound/jack.h>
+#include <sound/pcm_params.h>
+#include <linux/switch.h>
+#include <linux/input/sec_jack.h>
 
 #include <asm/mach-types.h>
-#include <mach/gpio.h>
 
 #include "../codecs/wm8994.h"
 
@@ -34,42 +36,24 @@ static struct snd_soc_jack_pin jack_pins[] = {
 		.mask = SND_JACK_MICROPHONE,
 	}, {
 		.pin = "Headset Stereophone",
-		.mask = SND_JACK_HEADPHONE | SND_JACK_MECHANICAL |
-			SND_JACK_AVOUT,
-	},
-};
-
-/* 3.5 pie jack detection gpios */
-static struct snd_soc_jack_gpio jack_gpios[] = {
-	{
-		.gpio = S5PV210_GPH0(6),
-		.name = "DET_3.5",
-		.report = SND_JACK_HEADSET | SND_JACK_MECHANICAL |
-			SND_JACK_AVOUT,
-		.debounce_time = 200,
+		.mask = SND_JACK_HEADPHONE,
 	},
 };
 
 static const struct snd_soc_dapm_widget qss_dapm_widgets[] = {
-	SND_SOC_DAPM_SPK("Ext Left Spk", NULL),
-	SND_SOC_DAPM_SPK("Ext Right Spk", NULL),
-	SND_SOC_DAPM_SPK("Ext Rcv", NULL),
+	SND_SOC_DAPM_SPK("Back Spk", NULL),
+	SND_SOC_DAPM_SPK("Front Earpiece", NULL),
 	SND_SOC_DAPM_HP("Headset Stereophone", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("Main Mic", NULL),
-	SND_SOC_DAPM_MIC("2nd Mic", NULL),
-	SND_SOC_DAPM_LINE("Radio In", NULL),
 };
 
 static const struct snd_soc_dapm_route qss_dapm_routes[] = {
-	{"Ext Left Spk", NULL, "SPKOUTLP"},
-	{"Ext Left Spk", NULL, "SPKOUTLN"},
+	{"Back Spk", NULL, "SPKOUTLP"},
+	{"Back Spk", NULL, "SPKOUTLN"},
 
-	{"Ext Right Spk", NULL, "SPKOUTRP"},
-	{"Ext Right Spk", NULL, "SPKOUTRN"},
-
-	{"Ext Rcv", NULL, "HPOUT2N"},
-	{"Ext Rcv", NULL, "HPOUT2P"},
+	{"Front Earpiece", NULL, "HPOUT2N"},
+	{"Front Earpiece", NULL, "HPOUT2P"},
 
 	{"Headset Stereophone", NULL, "HPOUT1L"},
 	{"Headset Stereophone", NULL, "HPOUT1R"},
@@ -77,15 +61,50 @@ static const struct snd_soc_dapm_route qss_dapm_routes[] = {
 	{"IN1RN", NULL, "Headset Mic"},
 	{"IN1RP", NULL, "Headset Mic"},
 
-	{"IN1RN", NULL, "2nd Mic"},
-	{"IN1RP", NULL, "2nd Mic"},
-
 	{"IN1LN", NULL, "Main Mic"},
 	{"IN1LP", NULL, "Main Mic"},
-
-	{"IN2LN", NULL, "Radio In"},
-	{"IN2RN", NULL, "Radio In"},
 };
+
+static void jack_switch_cb(struct switch_handler *handler, unsigned state)
+{
+	int report = 0;
+
+	if (state & SEC_HEADSET_4POLE)
+		report |= SND_JACK_HEADSET;
+	else if (state & SEC_HEADSET_3POLE)
+		report |= SND_JACK_HEADPHONE;
+
+	snd_soc_jack_report(&jack, report, SND_JACK_HEADSET);
+}
+
+static DEFINE_SWITCH_HANDLER(jack_switch, "h2w", JACK_SWITCH_STATE, jack_switch_cb, NULL);
+
+/*
+ * Headset Stereophone:
+ *  DAC1 Switch         => On On
+ *  Headphone Switch    => On On
+ *  Headphone ZC Switch => On On
+ * 
+ * SPKL DAC1 Switch
+ * Speaker Mixer Volume
+ * 
+ * Earpiece Switch
+ * Left Output Mixer DAC Switch
+ * Right Output Mixer DAC Switch
+ * Earpiece Mixer Left Output Switch
+ * Earpiece Mixer Right Output Switch
+ * Earpiece Mixer Direct Voice Switch
+ * Output Switch
+ * 
+ * 
+ * DAC1
+ * tinymix 123 1 && tinymix 158 1 && tinymix 163 1 
+ * 
+ * tinymix 138 1 && tinymix 139 1
+ * tinymix 149 1 && tinymix 64 3
+ * 
+ * tinymix 206 1 && tinymix 214 1 && tinymix 56 1 && tinymix 197 1 && tinymix 198 1
+ */
 
 static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -93,17 +112,37 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	int ret;
 
-	/* set endpoints to not connected */
-	snd_soc_dapm_nc_pin(dapm, "IN2LP:VXRN");
-	snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
+	ret = snd_soc_dapm_new_controls(dapm, qss_dapm_widgets,
+				ARRAY_SIZE(qss_dapm_widgets));
+	if (ret)
+		return ret;
+
+	snd_soc_dapm_add_routes(dapm, qss_dapm_routes,
+				ARRAY_SIZE(qss_dapm_routes));
+
+	snd_soc_dapm_enable_pin(dapm, "Back Spk");
+	snd_soc_dapm_enable_pin(dapm, "Front Earpiece");
+	snd_soc_dapm_enable_pin(dapm, "Main Mic");
+
+	/* Other pins NC */
+	snd_soc_dapm_nc_pin(dapm, "SPKOUTRP");
+	snd_soc_dapm_nc_pin(dapm, "SPKOUTRN");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT1N");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT1P");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT2N");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT2P");
+	snd_soc_dapm_nc_pin(dapm, "IN2LN");
+	snd_soc_dapm_nc_pin(dapm, "IN2RN");
+	snd_soc_dapm_nc_pin(dapm, "IN2LP:VXRN");
+	snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
+
+	ret = snd_soc_dapm_sync(dapm);
+	if (ret)
+		return ret;
 
 	/* Headset jack detection */
 	ret = snd_soc_jack_new(codec, "Headset Jack",
-			SND_JACK_HEADSET | SND_JACK_MECHANICAL | SND_JACK_AVOUT,
+			SND_JACK_HEADSET,
 			&jack);
 	if (ret)
 		return ret;
@@ -112,12 +151,14 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret)
 		return ret;
 
-	ret = snd_soc_jack_add_gpios(&jack, ARRAY_SIZE(jack_gpios), jack_gpios);
+	ret = switch_handler_register(&jack_switch);
 	if (ret)
 		return ret;
 
 	return 0;
 }
+
+#define QSS_WM8994_FREQ 24000000
 
 static int qss_hifi_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params)
@@ -125,8 +166,16 @@ static int qss_hifi_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *codec_dai = rtd->codec_dai;
 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
-	unsigned int pll_out = 24000000;
+	unsigned int pll_out;
 	int ret = 0;
+
+	/* AIF1CLK should be >=3MHz for optimal performance */
+	if (params_format(params) == SNDRV_PCM_FORMAT_S24_LE)
+		pll_out = params_rate(params) * 384;
+	else if (params_rate(params) == 8000 || params_rate(params) == 11025)
+		pll_out = params_rate(params) * 512;
+	else
+		pll_out = params_rate(params) * 256;
 
 	/* set the cpu DAI configuration */
 	ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_I2S |
@@ -141,14 +190,15 @@ static int qss_hifi_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 
 	/* set the codec FLL */
-	ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL1, WM8994_FLL_SRC_MCLK1, pll_out,
-			params_rate(params) * 256);
+	ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL1, WM8994_FLL_SRC_MCLK1,
+				  QSS_WM8994_FREQ, pll_out);
 	if (ret < 0)
 		return ret;
 
 	/* set the codec system clock */
 	ret = snd_soc_dai_set_sysclk(codec_dai, WM8994_SYSCLK_FLL1,
-			params_rate(params) * 256, SND_SOC_CLOCK_IN);
+				     pll_out, SND_SOC_CLOCK_IN);
+
 	if (ret < 0)
 		return ret;
 
@@ -165,7 +215,7 @@ static struct snd_soc_dai_link qss_dai[] = {
 		.stream_name = "WM8994 HiFi",
 		.cpu_dai_name = "samsung-i2s.0",
 		.codec_dai_name = "wm8994-aif1",
-		.platform_name = "samsung-idma",
+		.platform_name = "samsung-audio",
 		.codec_name = "wm8994-codec",
 		.init = qss_wm8994_init,
 		.ops = &qss_hifi_ops,
@@ -173,15 +223,10 @@ static struct snd_soc_dai_link qss_dai[] = {
 };
 
 static struct snd_soc_card qss = {
-	.name = "qss",
+	.name = "QSS-I2S",
 	.owner = THIS_MODULE,
 	.dai_link = qss_dai,
 	.num_links = ARRAY_SIZE(qss_dai),
-
-	.dapm_widgets = qss_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(qss_dapm_widgets),
-	.dapm_routes = qss_dapm_routes,
-	.num_dapm_routes = ARRAY_SIZE(qss_dapm_routes),
 };
 
 static int __init qss_init(void)
@@ -196,8 +241,8 @@ static int __init qss_init(void)
 		return -ENOMEM;
 
 	platform_set_drvdata(qss_snd_device, &qss);
-	ret = platform_device_add(qss_snd_device);
 
+	ret = platform_device_add(qss_snd_device);
 	if (ret) {
 		platform_device_put(qss_snd_device);
 	}
