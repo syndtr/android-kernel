@@ -30,6 +30,8 @@
 
 #include "wm8994.h"
 
+static int wm8994_ldo_in_use(struct wm8994_pdata *pdata, int ldo);
+
 /**
  * wm8994_reg_read: Read a single WM8994 register.
  *
@@ -195,10 +197,94 @@ static const char *wm8958_main_supplies[] = {
 static int wm8994_suspend(struct device *dev)
 {
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
-	int ret;
+	int ret, i;
 
-	if (wm8994->suspended)
-		return 0;
+	/* Disable LDO pulldowns while the device is suspended if we
+	 * don't know that something will be driving them. */
+	if (!wm8994->ldo_ena_always_driven)
+		wm8994_set_bits(wm8994, WM8994_PULL_CONTROL_2,
+				WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD |
+				WM8994_SPKMODE_PU | WM8994_CSNADDR_PD,
+				WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD |
+				WM8994_SPKMODE_PU | WM8994_CSNADDR_PD);
+
+	for (i = 0; i < WM8994_NUM_LDO_REGS; i++) {
+		wm8994_set_bits(wm8994, WM8994_LDO_1 + i,
+				WM8994_LDO1_DISCH, 0);
+	}
+
+	/* Explicitly put the device into reset in case regulators
+	 * don't get disabled in order to ensure consistent restart.
+	 */
+	wm8994_reg_write(wm8994, WM8994_SOFTWARE_RESET, 0);
+
+	regcache_cache_only(wm8994->regmap, true);
+	regcache_mark_dirty(wm8994->regmap);
+
+	ret = regulator_bulk_disable(wm8994->num_supplies,
+				     wm8994->supplies);
+	if (ret != 0) {
+		dev_err(dev, "Failed to disable supplies: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int wm8994_resume(struct device *dev)
+{
+	struct wm8994 *wm8994 = dev_get_drvdata(dev);
+	struct wm8994_pdata *pdata = wm8994->dev->platform_data;
+	int ret, i;
+	int pulls = 0;
+
+	dev_err(dev, "Resume\n");
+
+	ret = regulator_bulk_enable(wm8994->num_supplies,
+				    wm8994->supplies);
+	if (ret != 0) {
+		dev_err(dev, "Failed to enable supplies: %d\n", ret);
+		return ret;
+	}
+
+	regcache_cache_only(wm8994->regmap, false);
+	ret = regcache_sync(wm8994->regmap);
+	if (ret != 0) {
+		dev_err(dev, "Failed to restore register map: %d\n", ret);
+		goto err_enable;
+	}
+
+	/* Disable LDO pulldowns while the device is active */
+	if (pdata && pdata->spkmode_pu)
+		pulls |= WM8994_SPKMODE_PU;
+	wm8994_set_bits(wm8994, WM8994_PULL_CONTROL_2,
+			WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD |
+			WM8994_SPKMODE_PU | WM8994_CSNADDR_PD,
+			pulls);
+
+	for (i = 0; i < WM8994_NUM_LDO_REGS; i++) {
+		if (wm8994_ldo_in_use(pdata, i))
+			wm8994_set_bits(wm8994, WM8994_LDO_1 + i,
+					WM8994_LDO1_DISCH, WM8994_LDO1_DISCH);
+		else
+			wm8994_set_bits(wm8994, WM8994_LDO_1 + i,
+					WM8994_LDO1_DISCH, 0);
+	}
+
+	return 0;
+
+err_enable:
+	regulator_bulk_disable(wm8994->num_supplies, wm8994->supplies);
+
+	return ret;
+}
+#endif
+
+#ifdef CONFIG_PM_RUNTIME
+static int wm8994_runtime_suspend(struct device *dev)
+{
+	struct wm8994 *wm8994 = dev_get_drvdata(dev);
+	int ret;
 
 	/* Don't actually go through with the suspend if the CODEC is
 	 * still active (eg, for audio passthrough from CP. */
@@ -259,70 +345,21 @@ static int wm8994_suspend(struct device *dev)
 		break;
 	}
 
-	/* Disable LDO pulldowns while the device is suspended if we
-	 * don't know that something will be driving them. */
-	if (!wm8994->ldo_ena_always_driven)
-		wm8994_set_bits(wm8994, WM8994_PULL_CONTROL_2,
-				WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD,
-				WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD);
-
-	/* Explicitly put the device into reset in case regulators
-	 * don't get disabled in order to ensure consistent restart.
-	 */
-	wm8994_reg_write(wm8994, WM8994_SOFTWARE_RESET,
-			 wm8994_reg_read(wm8994, WM8994_SOFTWARE_RESET));
-
-	regcache_cache_only(wm8994->regmap, true);
-	regcache_mark_dirty(wm8994->regmap);
-
 	wm8994->suspended = true;
 
-	ret = regulator_bulk_disable(wm8994->num_supplies,
-				     wm8994->supplies);
-	if (ret != 0) {
-		dev_err(dev, "Failed to disable supplies: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
+	return wm8994_suspend(dev);
 }
 
-static int wm8994_resume(struct device *dev)
+static int wm8994_runtime_resume(struct device *dev)
 {
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
-	int ret;
 
-	/* We may have lied to the PM core about suspending */
 	if (!wm8994->suspended)
 		return 0;
 
-	ret = regulator_bulk_enable(wm8994->num_supplies,
-				    wm8994->supplies);
-	if (ret != 0) {
-		dev_err(dev, "Failed to enable supplies: %d\n", ret);
-		return ret;
-	}
-
-	regcache_cache_only(wm8994->regmap, false);
-	ret = regcache_sync(wm8994->regmap);
-	if (ret != 0) {
-		dev_err(dev, "Failed to restore register map: %d\n", ret);
-		goto err_enable;
-	}
-
-	/* Disable LDO pulldowns while the device is active */
-	wm8994_set_bits(wm8994, WM8994_PULL_CONTROL_2,
-			WM8994_LDO1ENA_PD | WM8994_LDO2ENA_PD,
-			0);
-
 	wm8994->suspended = false;
 
-	return 0;
-
-err_enable:
-	regulator_bulk_disable(wm8994->num_supplies, wm8994->supplies);
-
-	return ret;
+	return wm8994_resume(dev);
 }
 #endif
 
@@ -411,7 +448,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		BUG();
 		goto err_regmap;
 	}
-		
+
 	ret = regulator_bulk_get(wm8994->dev, wm8994->num_supplies,
 				 wm8994->supplies);
 	if (ret != 0) {
@@ -505,14 +542,15 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		break;
 	default:
 		dev_err(wm8994->dev, "Unknown device type %d\n", wm8994->type);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_enable;
 	}
 
 	ret = regmap_reinit_cache(wm8994->regmap, regmap_config);
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to reinit register cache: %d\n",
 			ret);
-		return ret;
+		goto err_enable;
 	}
 
 	regcache_cache_bypass(wm8994->regmap, false);
@@ -566,9 +604,6 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		dev_err(wm8994->dev, "Failed to add children: %d\n", ret);
 		goto err_irq;
 	}
-
-	pm_runtime_enable(wm8994->dev);
-	pm_runtime_resume(wm8994->dev);
 
 	return 0;
 
@@ -648,8 +683,11 @@ static const struct i2c_device_id wm8994_i2c_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, wm8994_i2c_id);
 
-static UNIVERSAL_DEV_PM_OPS(wm8994_pm_ops, wm8994_suspend, wm8994_resume,
-			    NULL);
+static const struct dev_pm_ops wm8994_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(wm8994_suspend, wm8994_resume)
+	SET_RUNTIME_PM_OPS(wm8994_runtime_suspend, wm8994_runtime_resume,
+			   NULL)
+};
 
 static struct i2c_driver wm8994_i2c_driver = {
 	.driver = {
