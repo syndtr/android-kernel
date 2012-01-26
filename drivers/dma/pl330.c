@@ -834,10 +834,8 @@ pl330_probe(struct amba_device *adev, const struct amba_id *id)
 
 	amba_set_drvdata(adev, pdmac);
 
-#ifndef CONFIG_PM_RUNTIME
 	/* enable dma clk */
 	clk_enable(pdmac->clk);
-#endif
 
 	irq = adev->irq[0];
 	ret = request_irq(irq, pl330_irq_handler, 0,
@@ -967,9 +965,7 @@ static int __devexit pl330_remove(struct amba_device *adev)
 	res = &adev->res;
 	release_mem_region(res->start, resource_size(res));
 
-#ifndef CONFIG_PM_RUNTIME
 	clk_disable(pdmac->clk);
-#endif
 
 	kfree(pdmac);
 
