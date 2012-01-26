@@ -17,6 +17,7 @@
 #include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/input.h>
 #include <linux/input/cypress-touchkey.h>
+#include <linux/input/sec_jack.h>
 
 #include <mach/irqs.h>
 #include <mach/gpio.h>
@@ -26,10 +27,13 @@
 #include <plat/iic.h>
 #include <plat/regs-iic.h>
 #include <plat/gpio-cfg.h>
+#include <plat/adc.h>
 
 #include <mach/qss.h>
 
 #define KEYPAD_BUTTONS_NR	3
+
+#define S3C_ADC_JACK		3
 
 /* Keypad */
 
@@ -220,8 +224,133 @@ static void __init qss_yas529_cfg_gpio(void)
 	s3c_i2c12_cfg_gpio(&s3c_device_i2c12);
 }
 
+/* sec jack */
+
+static struct platform_device qss_sec_jack;
+
+static void sec_jack_set_micbias_state(bool on)
+{
+	qss_set_micbias_ear(on);
+}
+
+static struct sec_jack_zone sec_jack_zones[] = {
+	{
+		/* adc < 50, unstable zone, default to 3pole if it stays
+		* in this range for a half second (20ms delays, 25 samples)
+		*/
+		.adc_high = 50,
+		.delay_ms = 20,
+		.check_count = 25,
+		.jack_type = SEC_HEADSET_3POLE,
+	},
+	{
+		/* 50 < adc <= 490, unstable zone, default to 3pole if it stays
+		* in this range for a second (10ms delays, 100 samples)
+		*/
+		.adc_high = 490,
+		.delay_ms = 10,
+		.check_count = 100,
+		.jack_type = SEC_HEADSET_3POLE,
+	},
+	{
+		/* 490 < adc <= 900, unstable zone, default to 4pole if it
+		* stays in this range for a second (10ms delays, 100 samples)
+		*/
+		.adc_high = 900,
+		.delay_ms = 10,
+		.check_count = 100,
+		.jack_type = SEC_HEADSET_4POLE,
+	},
+	{
+		/* 900 < adc <= 1500, 4 pole zone, default to 4pole if it
+		* stays in this range for 200ms (20ms delays, 10 samples)
+		*/
+		.adc_high = 1500,
+		.delay_ms = 20,
+		.check_count = 10,
+		.jack_type = SEC_HEADSET_4POLE,
+	},
+	{
+		/* adc > 1500, unstable zone, default to 3pole if it stays
+		* in this range for a second (10ms delays, 100 samples)
+		*/
+		.adc_high = 0x7fffffff,
+		.delay_ms = 10,
+		.check_count = 100,
+		.jack_type = SEC_HEADSET_3POLE,
+	},
+};
+
+/* To support 3-buttons earjack */
+static struct sec_jack_buttons_zone sec_jack_buttons_zones[] = {
+	{
+		/* 0 <= adc <= 93, stable zone */
+		.code           = KEY_MEDIA,
+		.adc_low        = 0,
+		.adc_high       = 93,
+	},
+	{
+		/* 94 <= adc <= 167, stable zone */
+		.code           = KEY_PREVIOUSSONG,
+		.adc_low        = 94,
+		.adc_high       = 167,
+	},
+	{
+		/* 168 <= adc <= 370, stable zone */
+		.code           = KEY_NEXTSONG,
+		.adc_low        = 168,
+		.adc_high       = 370,
+	},
+};
+
+static int sec_jack_get_adc_value(void)
+{
+	static struct s3c_adc_client *client;
+
+	if (IS_ERR(client))
+		return PTR_ERR(client);
+
+	if (!client) {
+		client = s3c_adc_register(&qss_sec_jack, NULL, NULL, 0);
+		if (IS_ERR(client)) {
+			pr_err("qss-input: cannot register adc for sec_jack\n");
+			return PTR_ERR(client);
+		}
+	}
+
+	return (1800 * s3c_adc_read(client, S3C_ADC_JACK)) / 1024;
+}
+
+struct sec_jack_platform_data sec_jack_pdata = {
+	.set_micbias_state	= sec_jack_set_micbias_state,
+	.get_adc_value		= sec_jack_get_adc_value,
+	.zones			= sec_jack_zones,
+	.num_zones		= ARRAY_SIZE(sec_jack_zones),
+	.buttons_zones		= sec_jack_buttons_zones,
+	.num_buttons_zones	= ARRAY_SIZE(sec_jack_buttons_zones),
+	.det_gpio		= GPIO_JACK_INT,
+	.send_end_gpio		= GPIO_SEND_END_INT,
+};
+
+static struct platform_device qss_jack = {
+	.name	= "sec_jack",
+	.id	= 1, /* will be used also for gpio_event id */
+	.dev	= {
+		.platform_data	= &sec_jack_pdata,
+	},
+};
+
+static void __init qss_jack_cfg_gpio(void)
+{
+	/* gpio interrupt */
+	s3c_gpio_cfgrange_nopull(GPIO_JACK_INT, 1, EINT_MODE);
+	s3c_gpio_cfgrange_nopull(GPIO_SEND_END_INT, 1, EINT_MODE);
+}
+
+
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_keypad,
+	&qss_jack,
 	&s3c_device_i2c2,
 	&s3c_device_i2c5,
 	&s3c_device_i2c10,
@@ -236,6 +365,7 @@ void __init qss_input_init(void)
 	qss_kr3dh_cfg_gpio();
 	qss_touchkey_cfg_gpio();
 	qss_yas529_cfg_gpio();
+	qss_jack_cfg_gpio();
 
 	/* i2c platdata */
 	s3c_i2c2_set_platdata(&i2c2_pdata);
