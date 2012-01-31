@@ -222,6 +222,9 @@ static void __init qss_yas529_cfg_gpio(void)
 {
 	/* i2c gpio cfg */
 	s3c_i2c12_cfg_gpio(&s3c_device_i2c12);
+
+	s3c_gpio_cfgrange_nopull(GPIO_MSENSE_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_MSENSE_EN, 1);
 }
 
 /* sec jack */
