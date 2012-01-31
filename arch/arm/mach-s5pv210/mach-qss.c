@@ -12,7 +12,6 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/serial_core.h>
-#include <linux/sysdev.h>
 #include <linux/gpio.h>
 
 #include <asm/hardware/vic.h>

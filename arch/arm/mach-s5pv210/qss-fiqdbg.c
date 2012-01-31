@@ -17,7 +17,6 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/irq.h>
-#include <linux/sysdev.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/syscore_ops.h>
