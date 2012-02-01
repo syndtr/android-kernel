@@ -17,6 +17,7 @@
 #include <linux/i2c/atmel_mxt_ts.h>
 #include <linux/input.h>
 #include <linux/input/cypress-touchkey.h>
+#include <linux/input/gp2a_samsung.h>
 #include <linux/input/sec_jack.h>
 
 #include <mach/irqs.h>
@@ -34,6 +35,7 @@
 #define KEYPAD_BUTTONS_NR	3
 
 #define S3C_ADC_JACK		3
+#define S3C_ADC_GP2A		9
 
 /* Keypad */
 
@@ -210,6 +212,65 @@ static void __init qss_touchkey_cfg_gpio(void)
 		i2c10_devs[0].irq = ret;
 }
 
+/* gp2a light sensor */
+
+static int gp2a_power(bool on)
+{
+	static bool initialized;
+
+	if (!initialized) {
+		gpio_request(GPIO_GP2A_EN, "GP2A_EN");
+		gpio_direction_output(GPIO_GP2A_EN, 0);
+		initialized = true;
+	}
+
+	gpio_direction_output(GPIO_GP2A_EN, on);
+
+	return 0;
+}
+
+static int gp2a_light_adc_value(void)
+{
+	static struct s3c_adc_client *client;
+
+	if (IS_ERR(client))
+		return PTR_ERR(client);
+
+	if (!client) {
+		client = s3c_adc_register(&s3c_device_i2c11, NULL, NULL, 0);
+		if (IS_ERR(client)) {
+			pr_err("qss-input: cannot register adc for gp2a\n");
+			return PTR_ERR(client);
+		}
+	}
+
+	return s3c_adc_read(client, S3C_ADC_GP2A);
+}
+
+static struct gp2a_platform_data gp2a_pdata = {
+        .power = gp2a_power,
+        .p_out = GPIO_GP2A_PROXIMITY_INT,
+        .light_adc_value = gp2a_light_adc_value,
+};
+
+static struct i2c_board_info i2c11_devs[] __initdata = {
+	{
+		I2C_BOARD_INFO("gp2a", (0x88 >> 1)),
+		.platform_data = &gp2a_pdata,
+	},
+};
+
+static void __init qss_gp2a_cfg_gpio(void)
+{
+	/* i2c gpio cfg */
+	s3c_i2c11_cfg_gpio(&s3c_device_i2c11);
+
+	s3c_gpio_cfgrange_nopull(GPIO_GP2A_EN, 1, S3C_GPIO_OUTPUT);
+	gpio_set_value(GPIO_GP2A_EN, 0);
+
+	s3c_gpio_cfgrange_nopull(GPIO_GP2A_PROXIMITY_INT, 1, EINT_MODE);
+}
+
 /* yas529 geomagnetic sensor */
 
 static struct i2c_board_info i2c12_devs[] __initdata = {
@@ -357,6 +418,7 @@ static struct platform_device *qss_devices[] __initdata = {
 	&s3c_device_i2c2,
 	&s3c_device_i2c5,
 	&s3c_device_i2c10,
+	&s3c_device_i2c11,
 	&s3c_device_i2c12,
 };
 
@@ -367,6 +429,7 @@ void __init qss_input_init(void)
 	qss_tsp_cfg_gpio();
 	qss_kr3dh_cfg_gpio();
 	qss_touchkey_cfg_gpio();
+	qss_gp2a_cfg_gpio();
 	qss_yas529_cfg_gpio();
 	qss_jack_cfg_gpio();
 
@@ -384,6 +447,9 @@ void __init qss_input_init(void)
 
 	/* touchkey */
 	i2c_register_board_info(10, i2c10_devs, ARRAY_SIZE(i2c10_devs));
+
+	/* gp2a */
+	i2c_register_board_info(11, i2c11_devs, ARRAY_SIZE(i2c11_devs));
 
 	/* yas529 */
 	i2c_register_board_info(12, i2c12_devs, ARRAY_SIZE(i2c12_devs));
