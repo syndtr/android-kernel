@@ -251,7 +251,7 @@ static int yaffs_sync_object(struct file *file, struct dentry *dentry,
 static int yaffs_readdir(struct file *f, void *dirent, filldir_t filldir);
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 5, 0))
-static int yaffs_create(struct inode *dir, struct dentry *dentry, int mode,
+static int yaffs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 			struct nameidata *n);
 static struct dentry *yaffs_lookup(struct inode *dir, struct dentry *dentry,
 				   struct nameidata *n);
@@ -264,10 +264,10 @@ static int yaffs_link(struct dentry *old_dentry, struct inode *dir,
 static int yaffs_unlink(struct inode *dir, struct dentry *dentry);
 static int yaffs_symlink(struct inode *dir, struct dentry *dentry,
 			 const char *symname);
-static int yaffs_mkdir(struct inode *dir, struct dentry *dentry, int mode);
+static int yaffs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 5, 0))
-static int yaffs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+static int yaffs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       dev_t dev);
 #else
 static int yaffs_mknod(struct inode *dir, struct dentry *dentry, int mode,
@@ -1618,7 +1618,7 @@ out:
 #endif
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 5, 0))
-static int yaffs_mknod(struct inode *dir, struct dentry *dentry, int mode,
+static int yaffs_mknod(struct inode *dir, struct dentry *dentry, umode_t mode,
 		       dev_t rdev)
 #else
 static int yaffs_mknod(struct inode *dir, struct dentry *dentry, int mode,
@@ -1708,7 +1708,7 @@ static int yaffs_mknod(struct inode *dir, struct dentry *dentry, int mode,
 	return error;
 }
 
-static int yaffs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+static int yaffs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int ret_val;
 	yaffs_trace(YAFFS_TRACE_OS, "yaffs_mkdir");
@@ -1717,7 +1717,7 @@ static int yaffs_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 }
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 5, 0))
-static int yaffs_create(struct inode *dir, struct dentry *dentry, int mode,
+static int yaffs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 			struct nameidata *n)
 #else
 static int yaffs_create(struct inode *dir, struct dentry *dentry, int mode)
