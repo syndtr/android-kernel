@@ -224,14 +224,6 @@ static int modem_reset(struct modemctl *mc)
 	return 0;
 }
 
-static int modem_off(struct modemctl *mc)
-{
-	pr_info("[MODEM] modem_off()\n");
-	gpio_set_value(mc->gpio_cp_reset, 0);
-	mc->status = MODEM_OFF;
-	return 0;
-}
-
 static int modem_pwr_status(struct modemctl *mc)
 {
 	pr_debug("%s\n", __func__);
@@ -245,6 +237,8 @@ static int dpram_modem_pwroff(struct modemctl *mc)
 	gpio_set_value(mc->gpio_phone_on, 0);
 	gpio_set_value(mc->gpio_cp_reset, 0);
 	mdelay(100);
+
+	mc->status = MODEM_OFF;
 
 	return 0;
 }
@@ -907,12 +901,30 @@ static const struct dev_pm_ops modemctl_pm_ops = {
 	.resume     = modemctl_resume,
 };
 
+static void modemctl_shutdown(struct platform_device *pdev)
+{
+	struct modemctl *mc = platform_get_drvdata(pdev);
+	int wait_cnt = 2;
+
+	mutex_lock(&mc->ctl_lock);
+	while(wait_cnt) {
+		dpram_modem_pwroff(mc);
+		if (!gpio_get_value(mc->gpio_phone_on)) {
+			pr_info("[MODEM] modemctl_shutdown() DONE\n");
+			break;
+		}
+		wait_cnt--;
+	}
+	mutex_unlock(&mc->ctl_lock);
+}
+
 static struct platform_driver modemctl_driver = {
 	.probe = modemctl_probe,
 	.driver = {
 		.name = "modemctl",
 		.pm   = &modemctl_pm_ops,
 	},
+	.shutdown = modemctl_shutdown,
 };
 
 static int __init modemctl_init(void)
