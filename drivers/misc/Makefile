@@ -49,3 +49,4 @@ obj-y				+= lis3lv02d/
 obj-y				+= carma/
 obj-$(CONFIG_ALTERA_STAPL)	+=altera-stapl/
 obj-$(CONFIG_MAX8997_MUIC)	+= max8997-muic.o
+obj-$(CONFIG_SAMSUNG_MODEMCTL)	+= samsung_modemctl/
