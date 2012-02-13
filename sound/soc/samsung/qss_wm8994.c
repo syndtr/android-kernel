@@ -19,8 +19,6 @@
 
 #include "../codecs/wm8994.h"
 
-#define MACHINE_NAME	0
-
 static struct snd_soc_card qss;
 static struct platform_device *qss_snd_device;
 
@@ -61,34 +59,10 @@ static const struct snd_soc_dapm_route qss_dapm_routes[] = {
 
 	{"IN1LN", NULL, "Main Mic"},
 	{"IN1LP", NULL, "Main Mic"},
-};
 
-/*
- * Headset Stereophone:
- *  DAC1 Switch         => On On
- *  Headphone Switch    => On On
- *  Headphone ZC Switch => On On
- * 
- * SPKL DAC1 Switch
- * Speaker Mixer Volume
- * 
- * Earpiece Switch
- * Left Output Mixer DAC Switch
- * Right Output Mixer DAC Switch
- * Earpiece Mixer Left Output Switch
- * Earpiece Mixer Right Output Switch
- * Earpiece Mixer Direct Voice Switch
- * Output Switch
- * 
- * 
- * DAC1
- * tinymix 123 1 && tinymix 158 1 && tinymix 163 1 
- * 
- * tinymix 138 1 && tinymix 139 1
- * tinymix 149 1 && tinymix 64 3
- * 
- * tinymix 206 1 && tinymix 214 1 && tinymix 56 1 && tinymix 197 1 && tinymix 198 1
- */
+        {"IN2LN", NULL, "2nd Mic"},
+        {"IN2LP:VXRN", NULL, "2nd Mic"},
+};
 
 static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -107,6 +81,7 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_enable_pin(dapm, "Back Spk");
 	snd_soc_dapm_enable_pin(dapm, "Front Earpiece");
 	snd_soc_dapm_enable_pin(dapm, "Main Mic");
+        snd_soc_dapm_enable_pin(dapm, "2nd Mic");
 
 	/* Other pins NC */
 	snd_soc_dapm_nc_pin(dapm, "SPKOUTRP");
@@ -115,9 +90,7 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT1P");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT2N");
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT2P");
-	snd_soc_dapm_nc_pin(dapm, "IN2LN");
 	snd_soc_dapm_nc_pin(dapm, "IN2RN");
-	snd_soc_dapm_nc_pin(dapm, "IN2LP:VXRN");
 	snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
 
 	ret = snd_soc_dapm_sync(dapm);
@@ -191,6 +164,62 @@ static struct snd_soc_ops qss_hifi_ops = {
 	.hw_params = qss_hifi_hw_params,
 };
 
+static int qss_voice_hw_params(struct snd_pcm_substream *substream,
+		struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	unsigned int pll_out;
+	int ret = 0;
+
+	if (params_rate(params) != 8000)
+		return -EINVAL;
+
+	pll_out = params_rate(params) * 256;
+
+	/* set codec DAI configuration */
+	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_DSP_A |
+			SND_SOC_DAIFMT_IB_NF | SND_SOC_DAIFMT_CBS_CFS);
+	if (ret < 0)
+		return ret;
+
+	/* set the codec FLL */
+	ret = snd_soc_dai_set_pll(codec_dai, WM8994_FLL2, WM8994_FLL_SRC_MCLK2,
+				  QSS_WM8994_FREQ, pll_out);
+	if (ret < 0)
+		return ret;
+
+	/* set the codec system clock */
+	ret = snd_soc_dai_set_sysclk(codec_dai, WM8994_SYSCLK_FLL2,
+				     pll_out, SND_SOC_CLOCK_IN);
+	if (ret < 0)
+		return ret;
+
+	return 0;
+}
+
+static struct snd_soc_ops qss_voice_ops = {
+	.hw_params = qss_voice_hw_params,
+};
+
+static struct snd_soc_dai_driver dai[] = {
+	{
+		.name = "qss-voice-dai",
+		.playback = {
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_8000_96000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+		.capture = {
+			.channels_min = 1,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_8000_96000,
+			.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		},
+	},
+};
+
 static struct snd_soc_dai_link qss_dai[] = {
 	{
 		.name = "WM8994",
@@ -201,7 +230,14 @@ static struct snd_soc_dai_link qss_dai[] = {
 		.codec_name = "wm8994-codec",
 		.init = qss_wm8994_init,
 		.ops = &qss_hifi_ops,
-	}
+	}, {
+		.name = "WM8994 Voice",
+		.stream_name = "Voice",
+		.cpu_dai_name = "qss-voice-dai",
+		.codec_dai_name = "wm8994-aif2",
+		.codec_name = "wm8994-codec",
+		.ops = &qss_voice_ops,
+	},
 };
 
 static struct snd_soc_card qss = {
@@ -222,13 +258,20 @@ static int __init qss_init(void)
 	if (!qss_snd_device)
 		return -ENOMEM;
 
+	ret = snd_soc_register_dais(&qss_snd_device->dev, dai, ARRAY_SIZE(dai));
+	if (ret)
+		goto err;
+
 	platform_set_drvdata(qss_snd_device, &qss);
 
 	ret = platform_device_add(qss_snd_device);
-	if (ret) {
-		platform_device_put(qss_snd_device);
-	}
+	if (ret)
+		goto err;
 
+	return 0;
+
+err:
+	platform_device_put(qss_snd_device);
 	return ret;
 }
 
