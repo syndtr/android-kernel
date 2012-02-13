@@ -188,6 +188,9 @@ static void __init qss_machine_init(void)
 
 	/* Sound */
 	qss_sound_init();
+
+	/* Phone */
+	qss_phone_init();
 }
 
 MACHINE_START(QSS, "QSS")

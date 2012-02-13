@@ -553,9 +553,9 @@ static struct gpio_init_data qss_init_gpios[] __initdata = {
 	// GPH1 ----------------------------
 	{
 		.num	= S5PV210_GPH1(0),
-		.cfg	= S3C_GPIO_INPUT,
-		.val	= S3C_GPIO_SETPIN_NONE,
-		.pud	= S3C_GPIO_PULL_DOWN,
+		.cfg	= S3C_GPIO_OUTPUT,
+		.val	= S3C_GPIO_SETPIN_ZERO,
+		.pud	= S3C_GPIO_PULL_NONE,
 		.drv	= S5P_GPIO_DRVSTR_LV1,
 	}, {
 		.num	= S5PV210_GPH1(1),
@@ -595,7 +595,7 @@ static struct gpio_init_data qss_init_gpios[] __initdata = {
 		.drv	= S5P_GPIO_DRVSTR_LV1,
 	}, {
 		.num	= S5PV210_GPH1(7), // GPIO_PHONE_ACTIVE
-		.cfg	= S3C_GPIO_SFN(0xF),
+		.cfg	= S3C_GPIO_INPUT,
 		.val	= S3C_GPIO_SETPIN_NONE,
 		.pud	= S3C_GPIO_PULL_NONE,
 		.drv	= S5P_GPIO_DRVSTR_LV1,
@@ -700,7 +700,7 @@ static struct gpio_init_data qss_init_gpios[] __initdata = {
 		.cfg	= S3C_GPIO_OUTPUT,
 		.val	= S3C_GPIO_SETPIN_ZERO,
 		.pud	= S3C_GPIO_PULL_DOWN,
-		.drv	= S5P_GPIO_DRVSTR_LV1,
+		.drv	= S5P_GPIO_DRVSTR_LV4,
 	},
 
 	// GPI ----------------------------
@@ -802,9 +802,9 @@ static struct gpio_init_data qss_init_gpios[] __initdata = {
 	// GPJ1 ----------------------------
 	{
 		.num	= S5PV210_GPJ1(0), // GPIO_PHONE_ON
-		.cfg	= S3C_GPIO_INPUT,
-		.val	= S3C_GPIO_SETPIN_NONE,
-		.pud	= S3C_GPIO_PULL_DOWN,
+		.cfg	= S3C_GPIO_OUTPUT,
+		.val	= S3C_GPIO_SETPIN_ZERO,
+		.pud	= S3C_GPIO_PULL_NONE,
 		.drv	= S5P_GPIO_DRVSTR_LV1,
 	}, {
 		.num	= S5PV210_GPJ1(1), // GPIO_VIBTONE_EN1
@@ -1290,7 +1290,7 @@ static unsigned int qss_sleep_gpio_table[][3] __initdata = {
 	{ S5PV210_GPJ0(7), S3C_GPIO_SLP_INPUT,	S3C_GPIO_SLP_PULL_NONE},
 
 	// GPJ1 ---------------------------------------------------
-	{ S5PV210_GPJ1(0), S3C_GPIO_SLP_PREV,   S3C_GPIO_SLP_PULL_DOWN},
+	{ S5PV210_GPJ1(0), S3C_GPIO_SLP_OUPUT0,	S3C_GPIO_SLP_PULL_NONE},
 	{ S5PV210_GPJ1(1), S3C_GPIO_SLP_OUPUT0,	S3C_GPIO_SLP_PULL_NONE},
 	{ S5PV210_GPJ1(2), S3C_GPIO_SLP_INPUT,  S3C_GPIO_SLP_PULL_DOWN},	//GPIO_GPJ12
 	{ S5PV210_GPJ1(3), S3C_GPIO_SLP_OUPUT0,	S3C_GPIO_SLP_PULL_NONE},
