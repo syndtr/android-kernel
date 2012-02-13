@@ -8,6 +8,9 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/init.h>
+#include <linux/err.h>
+#include <linux/export.h>
+#include <linux/device.h>
 #include <linux/i2c.h>
 #include <linux/gpio.h>
 #include <linux/platform_data/fsa9480.h>
@@ -67,6 +70,36 @@ static struct platform_device *qss_devices[] __initdata = {
 	&qss_device_uart_switch,
 };
 
+static void __init qss_switch_gpio_export(void)
+{
+	struct class *class;
+	struct device *dev;
+	int ret;
+
+	class = class_create(THIS_MODULE, "sec");
+	if (IS_ERR(class)) {
+		pr_err("Failed to create class 'sec': %ld\n",
+		       PTR_ERR(class));
+		return;
+	}
+
+	dev = device_create(class, NULL, 0, NULL, "uart_switch");
+	if (IS_ERR(dev)) {
+		pr_err("Failed to create device 'uart_switch': %ld\n",
+		       PTR_ERR(dev));
+		return;
+	}
+
+	ret = gpio_request(GPIO_UART_SEL, "UART_SEL");
+	if (ret < 0) {
+		pr_err("Failed to request gpio %d: %d\n", GPIO_UART_SEL, ret);
+		return;
+	}
+	gpio_direction_output(GPIO_UART_SEL, 1);
+	gpio_export(GPIO_UART_SEL, 1);
+	gpio_export_link(dev, "UART_SEL", GPIO_UART_SEL);
+}
+
 void __init qss_switch_init(void)
 {
 	/* switch gpio config */
@@ -77,4 +110,7 @@ void __init qss_switch_init(void)
 
 	/* register fsa9480 */
 	i2c_register_board_info(7, i2c7_devs, ARRAY_SIZE(i2c7_devs));
+	
+	/* export gpio */
+	qss_switch_gpio_export();
 }
