@@ -12,6 +12,13 @@
 #ifndef __QSS_H
 #define __QSS_H
 
+#define QSS_MEMBANK0_START	0x30000000
+#define QSS_MEMBANK0_SIZE	(80 * SZ_1M)
+#define QSS_MEMBANK1_START	0x40000000
+#define QSS_MEMBANK1_SIZE	(383 * SZ_1M)
+
+#define QSS_PA_RAMCONSOLE	(QSS_MEMBANK1_START + QSS_MEMBANK1_SIZE)
+
 /* inits */
 
 void qss_pm_init(void) __init;

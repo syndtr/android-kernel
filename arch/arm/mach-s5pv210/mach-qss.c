@@ -83,7 +83,19 @@ static struct s3c2410_uartcfg qss_uartcfgs[] __initdata = {
 	},
 };
 
+static struct resource ramconsole_resources[] = {
+	[0] = DEFINE_RES_MEM(QSS_PA_RAMCONSOLE, SZ_1M),
+};
+
+static struct platform_device qss_ramconsole = {
+	.name		= "ram_console",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(ramconsole_resources),
+	.resource	= ramconsole_resources,
+};
+
 static struct platform_device *qss_devices[] __initdata = {
+	&qss_ramconsole,
 	&s3c_device_adc,
 	&s3c_device_rtc,
 	&s3c_device_wdt,
@@ -93,10 +105,10 @@ static struct platform_device *qss_devices[] __initdata = {
 static void __init qss_fixup(struct tag *tag, char **cmdline,
 		struct meminfo *mi)
 {
-	mi->bank[0].start = 0x30000000;
-	mi->bank[0].size = 80 * SZ_1M;
-	mi->bank[1].start = 0x40000000;
-	mi->bank[1].size = 384 * SZ_1M;
+	mi->bank[0].start = QSS_MEMBANK0_START;
+	mi->bank[0].size = QSS_MEMBANK0_SIZE;
+	mi->bank[1].start = QSS_MEMBANK1_START;
+	mi->bank[1].size = QSS_MEMBANK1_SIZE;
 	mi->nr_banks = 2;
 }
 
