@@ -190,7 +190,7 @@ static void sec_jack_set_type(struct sec_jack_info *hi, int jack_type)
 	 * the type but then we get another interrupt and do it again
 	 */
 	if (jack_type == hi->cur_jack_type) {
-		if (jack_type == SEC_HEADSET_4POLE)
+		if (jack_type != SEC_HEADSET_4POLE)
 			pdata->set_micbias_state(false);
 		return;
 	}
@@ -493,25 +493,13 @@ static int sec_jack_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int sec_jack_resume(struct device *dev)
-{
-	struct sec_jack_info *hi = dev_get_drvdata(dev);
-	queue_work(hi->queue, &hi->detect_work);
-	return 0;
-}
-
-static const struct dev_pm_ops sec_jack_pm_ops = {
-	.resume = sec_jack_resume,
-};
-
 static struct platform_driver sec_jack_driver = {
 	.probe = sec_jack_probe,
 	.remove = sec_jack_remove,
 	.driver = {
-		.name = "sec_jack",
-		.owner = THIS_MODULE,
-		.pm = &sec_jack_pm_ops,
-	},
+			.name = "sec_jack",
+			.owner = THIS_MODULE,
+		   },
 };
 static int __init sec_jack_init(void)
 {
