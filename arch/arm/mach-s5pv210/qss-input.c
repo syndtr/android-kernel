@@ -113,13 +113,19 @@ static struct mxt_platform_data qt602240_pdata = {
 	.onoff		= tsp_onoff,
 };
 
-static struct s3c2410_platform_i2c i2c2_pdata = {
-	.flags		= 0,
-	.bus_num	= 2,
-	.slave_addr	= 0x10,
-	.frequency	= 400 * 1000,
-	.sda_delay	= S3C2410_IICLC_SDA_DELAY5 | S3C2410_IICLC_FILTER_ON,
-	.cfg_gpio	= s3c_i2c2_cfg_gpio,
+static struct i2c_gpio_platform_data i2c2_gpio_pdata = {
+	.sda_pin                = S5PV210_GPD1(4),
+	.scl_pin                = S5PV210_GPD1(5),
+	.udelay                 = 2,
+	.sda_is_open_drain      = 0,
+	.scl_is_open_drain      = 0,
+	.scl_is_output_only     = 0,
+};
+
+static struct platform_device s3c_device_i2c2_gpio = {
+	.name			= "i2c-gpio",
+	.id			= 2,
+	.dev.platform_data	= &i2c2_gpio_pdata,
 };
 
 static struct i2c_board_info i2c2_devs[] __initdata = {
@@ -133,6 +139,11 @@ static void __init qss_tsp_cfg_gpio(void)
 {
 	int ret;
 
+	/* i2c */
+	s3c_gpio_cfgall_range(S5PV210_GPD1(4), 2,
+			      S3C_GPIO_SFN(2), S3C_GPIO_PULL_UP);
+
+	/* ldo enable */
 	s3c_gpio_cfgrange_nopull(GPIO_TSP_LDO_EN, 1, S3C_GPIO_OUTPUT);
 	gpio_request(GPIO_TSP_LDO_EN, "TSP_LDO_EN");
 	tsp_onoff(1);
@@ -415,7 +426,7 @@ static void __init qss_jack_cfg_gpio(void)
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_keypad,
 	&qss_jack,
-	&s3c_device_i2c2,
+	&s3c_device_i2c2_gpio,
 	&s3c_device_i2c5,
 	&s3c_device_i2c10,
 	&s3c_device_i2c11,
@@ -434,7 +445,7 @@ void __init qss_input_init(void)
 	qss_jack_cfg_gpio();
 
 	/* i2c platdata */
-	s3c_i2c2_set_platdata(&i2c2_pdata);
+	//s3c_i2c2_set_platdata(&i2c2_pdata);
 
 	/* register devices */
 	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
