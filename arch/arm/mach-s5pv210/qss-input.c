@@ -9,7 +9,7 @@
 #include <linux/types.h>
 #include <linux/init.h>
 #include <linux/gpio.h>
-#include <linux/gpio_keys.h>
+#include <linux/gpio_event.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -32,54 +32,48 @@
 
 #include <mach/qss.h>
 
-#define KEYPAD_BUTTONS_NR	3
-
 #define S3C_ADC_JACK		3
 #define S3C_ADC_GP2A		9
 
 /* Keypad */
 
-static struct gpio_keys_button keypad_buttons[] = {
+static struct gpio_event_direct_entry qss_keypad_keys_map[] = {
 	{
-		.code 		= KEY_POWER,
-		.gpio		= GPIO_KEY_POWER,
-		.desc		= "keypad-power",
-		.type		= EV_KEY,
-		.active_low	= 1,
-		.wakeup		= 1,
-		.debounce_interval = 1,
-	},
-	{
-		.code 		= KEY_VOLUMEUP,
-		.gpio		= GPIO_KEY_VOLUMEUP,
-		.desc		= "keypad-volumeup",
-		.type		= EV_KEY,
-		.active_low	= 1,
-		.wakeup		= 1,
-		.debounce_interval = 1,
-	},
-	{
-		.code 		= KEY_VOLUMEDOWN,
-		.gpio		= GPIO_KEY_VOLUMEDOWN,
-		.desc		= "keypad-volumedown",
-		.type		= EV_KEY,
-		.active_low	= 1,
-		.wakeup		= 1,
-		.debounce_interval = 1,
+		.code	= KEY_POWER,
+		.gpio	= GPIO_KEY_POWER,
+	}, {
+		.code	= KEY_VOLUMEDOWN,
+		.gpio	= GPIO_KEY_VOLUMEDOWN,
+	}, {
+		.code	= KEY_VOLUMEUP,
+		.gpio	= GPIO_KEY_VOLUMEUP,
 	},
 };
 
-static struct gpio_keys_platform_data keypad_pdata = {
-	.name		= "qss-keypad",
-	.buttons	= keypad_buttons,
-	.nbuttons	= ARRAY_SIZE(keypad_buttons),
+static struct gpio_event_input_info qss_keypad_keys_info = {
+	.info.func = gpio_event_input_func,
+	.info.no_suspend = true,
+	.type = EV_KEY,
+	.keymap = qss_keypad_keys_map,
+	.keymap_size = ARRAY_SIZE(qss_keypad_keys_map),
+	.debounce_time.tv64 = 2 * NSEC_PER_MSEC,
+};
+
+static struct gpio_event_info *qss_keypad_info[] = {
+	&qss_keypad_keys_info.info,
+};
+
+static struct gpio_event_platform_data qss_keypad_pdata = {
+	.name = "qss-keypad",
+	.info = qss_keypad_info,
+	.info_count = ARRAY_SIZE(qss_keypad_info)
 };
 
 static struct platform_device qss_keypad = {
-	.name		= "gpio-keys",
-	.id		= 0,
-	.dev		= {
-		.platform_data	= &keypad_pdata,
+	.name	= GPIO_EVENT_DEV_NAME,
+	.id	= 0,
+	.dev	= {
+		.platform_data	= &qss_keypad_pdata,
 	},
 };
 
