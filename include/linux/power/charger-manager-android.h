@@ -47,7 +47,7 @@ enum data_source {
  *	true: measure battery temperature
  *	false: measure ambient temperature
  */
-struct charger_desc_ng {
+struct charger_desc_android {
 	char *psy_name;
 
 	unsigned int slow_polling_interval;

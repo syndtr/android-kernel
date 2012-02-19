@@ -13,7 +13,7 @@
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
 #include <linux/max17040_battery.h>
-#include <linux/power/charger-manager-ng.h>
+#include <linux/power/charger-manager-android.h>
 
 #include <mach/gpio.h>
 
@@ -250,7 +250,7 @@ int cm_battery_temp(int *mC)
 	return ret;
 }
 
-static struct charger_desc_ng charger_pdata = {
+static struct charger_desc_android charger_pdata = {
 	.psy_name		= "battery",
 	.slow_polling_interval	= 60 * 10,
 	.fast_polling_interval	= 60 * 1,
@@ -267,7 +267,7 @@ static struct charger_desc_ng charger_pdata = {
 };
 
 static struct platform_device qss_charger = {
-	.name		= "charger-manager-ng",
+	.name		= "charger-manager",
 	.id		= -1,
 	.dev = {
 		.platform_data = &charger_pdata,

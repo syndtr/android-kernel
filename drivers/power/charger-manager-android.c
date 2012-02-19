@@ -20,7 +20,7 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/platform_device.h>
-#include <linux/power/charger-manager-ng.h>
+#include <linux/power/charger-manager-android.h>
 #include <linux/regulator/consumer.h>
 #include <linux/wakelock.h>
 
@@ -50,7 +50,7 @@
 struct charger_manager {
 	struct list_head entry;
 	struct device *dev;
-	struct charger_desc_ng *desc;
+	struct charger_desc_android *desc;
 
 	struct work_struct work;
 	struct wake_lock wakelock;
@@ -222,7 +222,7 @@ static bool is_charging(struct charger_manager *cm)
 static int try_charger_enable(struct charger_manager *cm, bool enable)
 {
 	int err = 0, i;
-	struct charger_desc_ng *desc = cm->desc;
+	struct charger_desc_android *desc = cm->desc;
 
 	/* Ignore if it's redundent command */
 	if (enable && cm->charger_enabled)
@@ -310,7 +310,7 @@ static void uevent_notify(struct charger_manager *cm, const char *event)
  */
 static bool cm_monitor(struct charger_manager *cm)
 {
-	struct charger_desc_ng *desc = cm->desc;
+	struct charger_desc_android *desc = cm->desc;
 	int temp = desc->temperature_out_of_range(&cm->last_temp_mC);
 
 	dev_dbg(cm->dev, "monitoring (%2.2d.%3.3dC)\n",
@@ -387,7 +387,7 @@ static int charger_get_property(struct power_supply *psy,
 {
 	struct charger_manager *cm = container_of(psy,
 			struct charger_manager, charger_psy);
-	struct charger_desc_ng *desc = cm->desc;
+	struct charger_desc_android *desc = cm->desc;
 	int i, ret = 0, uV;
 
 	switch (psp) {
@@ -593,7 +593,7 @@ static struct power_supply psy_default = {
 
 static int charger_manager_probe(struct platform_device *pdev)
 {
-	struct charger_desc_ng *desc = dev_get_platdata(&pdev->dev);
+	struct charger_desc_android *desc = dev_get_platdata(&pdev->dev);
 	struct charger_manager *cm;
 	int ret = 0, i = 0;
 	union power_supply_propval val;
@@ -613,13 +613,13 @@ static int charger_manager_probe(struct platform_device *pdev)
 
 	/* Basic Values. Unspecified are Null or 0 */
 	cm->dev = &pdev->dev;
-	cm->desc = kzalloc(sizeof(struct charger_desc_ng), GFP_KERNEL);
+	cm->desc = kzalloc(sizeof(struct charger_desc_android), GFP_KERNEL);
 	if (!cm->desc) {
 		dev_err(&pdev->dev, "Cannot allocate memory.\n");
 		ret = -ENOMEM;
 		goto err_alloc_desc;
 	}
-	memcpy(cm->desc, desc, sizeof(struct charger_desc_ng));
+	memcpy(cm->desc, desc, sizeof(struct charger_desc_android));
 	cm->last_temp_mC = INT_MIN; /* denotes "unmeasured, yet" */
 
 	if (!desc->charger_regulators || desc->num_charger_regulators < 1) {
@@ -788,7 +788,7 @@ err_alloc:
 static int __devexit charger_manager_remove(struct platform_device *pdev)
 {
 	struct charger_manager *cm = platform_get_drvdata(pdev);
-	struct charger_desc_ng *desc = cm->desc;
+	struct charger_desc_android *desc = cm->desc;
 
 	if (desc->charger_regulators)
 		regulator_bulk_free(desc->num_charger_regulators,
@@ -804,9 +804,10 @@ static int __devexit charger_manager_remove(struct platform_device *pdev)
 }
 
 static const struct platform_device_id charger_manager_id[] = {
-	{ "charger-manager-ng", 0 },
+	{ "charger-manager", 0 },
 	{ },
 };
+MODULE_DEVICE_TABLE(platform, charger_manager_id);
 
 static int cm_suspend_prepare(struct device *dev)
 {
@@ -841,7 +842,7 @@ static const struct dev_pm_ops charger_manager_pm = {
 
 static struct platform_driver charger_manager_driver = {
 	.driver = {
-		.name = "charger-manager-ng",
+		.name = "charger-manager",
 		.owner = THIS_MODULE,
 		.pm = &charger_manager_pm,
 	},
@@ -865,4 +866,3 @@ module_exit(charger_manager_cleanup);
 MODULE_AUTHOR("MyungJoo Ham <myungjoo.ham@samsung.com>");
 MODULE_DESCRIPTION("Charger Manager NG");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("charger-manager-ng");
