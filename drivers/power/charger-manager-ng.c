@@ -22,8 +22,9 @@
 #include <linux/platform_device.h>
 #include <linux/power/charger-manager-ng.h>
 #include <linux/regulator/consumer.h>
-#include <linux/android_alarm.h>
 #include <linux/wakelock.h>
+
+#include "../staging/android/android_alarm.h"
 
 #define UEVENT_BUF_SIZE	32
 #define PSY_NAME_MAX	30
@@ -53,7 +54,7 @@ struct charger_manager {
 
 	struct work_struct work;
 	struct wake_lock wakelock;
-	struct alarm alarm;
+	struct android_alarm alarm;
 	ktime_t last_poll;
 	bool slow_poll;
 	bool external_changed;
@@ -343,7 +344,7 @@ static void cm_setup_alarm(struct charger_manager *cm, int seconds)
 	ktime_t next;
 
 	next = ktime_add(cm->last_poll, low_interval);
-	alarm_start_range(&cm->alarm, next, ktime_add(next, slack));
+	android_alarm_start_range(&cm->alarm, next, ktime_add(next, slack));
 }
 
 static void cm_monitor_work(struct work_struct *work)
@@ -361,7 +362,7 @@ static void cm_monitor_work(struct work_struct *work)
 	cm_setup_alarm(cm, cm->desc->fast_polling_interval);
 }
 
-static void cm_monitor_alarm(struct alarm *alarm)
+static void cm_monitor_alarm(struct android_alarm *alarm)
 {
 	struct charger_manager *cm =
 		container_of(alarm, struct charger_manager, alarm);
@@ -752,9 +753,9 @@ static int charger_manager_probe(struct platform_device *pdev)
 	INIT_WORK(&cm->work, cm_monitor_work);
 
 	cm->last_poll = alarm_get_elapsed_realtime();
-	alarm_init(&cm->alarm, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
+	android_alarm_init(&cm->alarm, ANDROID_ALARM_ELAPSED_REALTIME_WAKEUP,
 			cm_monitor_alarm);
-	
+
 	ret = try_charger_enable(cm, true);
 	if (ret) {
 		dev_err(&pdev->dev, "Cannot enable charger regulators\n");

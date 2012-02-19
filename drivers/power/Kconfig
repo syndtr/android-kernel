@@ -262,7 +262,7 @@ config CHARGER_MANAGER
 
 config CHARGER_MANAGER_NG
 	bool "Android version of battery charger manager"
-	depends on REGULATOR && WAKELOCK && RTC_INTF_ALARM
+	depends on REGULATOR && WAKELOCK && ANDROID_INTF_ALARM
 	help
 	  Say Y to enable android version of the battery charger manager.
 
