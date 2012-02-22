@@ -551,8 +551,6 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 			PVR_DPF((PVR_DBG_ERROR,"SysDeinitialise: EnableSGXClocks failed"));
 			return eError;
 		}
-
-		//CPUFreqDeregister();
 #endif	
 
 		
