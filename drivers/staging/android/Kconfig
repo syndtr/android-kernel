@@ -8,6 +8,11 @@ config ANDROID
 
 if ANDROID
 
+config ANDROID_BINDER_IPC_NEW
+	bool "Android Binder IPC Driver (New Implementation)"
+	default n
+	depends on !ANDROID_BINDER_IPC
+
 config ANDROID_BINDER_IPC
 	bool "Android Binder IPC Driver"
 	default n
