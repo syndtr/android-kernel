@@ -42,6 +42,7 @@ static const struct snd_soc_dapm_widget qss_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headset Stereophone", NULL),
 	SND_SOC_DAPM_MIC("Headset Mic", NULL),
 	SND_SOC_DAPM_MIC("Main Mic", NULL),
+	SND_SOC_DAPM_MIC("2nd Mic", NULL),
 };
 
 static const struct snd_soc_dapm_route qss_dapm_routes[] = {
@@ -61,7 +62,6 @@ static const struct snd_soc_dapm_route qss_dapm_routes[] = {
 	{"IN1LP", NULL, "Main Mic"},
 
         {"IN2LN", NULL, "2nd Mic"},
-        {"IN2LP:VXRN", NULL, "2nd Mic"},
 };
 
 static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
@@ -92,6 +92,7 @@ static int qss_wm8994_init(struct snd_soc_pcm_runtime *rtd)
 	snd_soc_dapm_nc_pin(dapm, "LINEOUT2P");
 	snd_soc_dapm_nc_pin(dapm, "IN2RN");
 	snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
+	snd_soc_dapm_nc_pin(dapm, "IN2LP:VXRN");
 
 	ret = snd_soc_dapm_sync(dapm);
 	if (ret)
@@ -164,7 +165,7 @@ static struct snd_soc_ops qss_hifi_ops = {
 	.hw_params = qss_hifi_hw_params,
 };
 
-static int qss_voice_hw_params(struct snd_pcm_substream *substream,
+static int qss_modem_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
@@ -198,13 +199,13 @@ static int qss_voice_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_ops qss_voice_ops = {
-	.hw_params = qss_voice_hw_params,
+static struct snd_soc_ops qss_modem_ops = {
+	.hw_params = qss_modem_hw_params,
 };
 
 static struct snd_soc_dai_driver dai[] = {
 	{
-		.name = "qss-voice-dai",
+		.name = "qss-modem-dai",
 		.playback = {
 			.channels_min = 1,
 			.channels_max = 2,
@@ -231,17 +232,17 @@ static struct snd_soc_dai_link qss_dai[] = {
 		.init = qss_wm8994_init,
 		.ops = &qss_hifi_ops,
 	}, {
-		.name = "WM8994 Voice",
-		.stream_name = "Voice",
-		.cpu_dai_name = "qss-voice-dai",
+		.name = "WM8994 Modem",
+		.stream_name = "Modem",
+		.cpu_dai_name = "qss-modem-dai",
 		.codec_dai_name = "wm8994-aif2",
 		.codec_name = "wm8994-codec",
-		.ops = &qss_voice_ops,
+		.ops = &qss_modem_ops,
 	},
 };
 
 static struct snd_soc_card qss = {
-	.name = "QSS-I2S",
+	.name = "qss",
 	.owner = THIS_MODULE,
 	.dai_link = qss_dai,
 	.num_links = ARRAY_SIZE(qss_dai),
