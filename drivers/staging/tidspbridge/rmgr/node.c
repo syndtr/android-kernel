@@ -159,7 +159,6 @@ struct node_mgr {
 	/* Loader properties */
 	struct nldr_object *nldr_obj;	/* Handle to loader */
 	struct node_ldr_fxns nldr_fxns;	/* Handle to loader functions */
-	bool loader_init;	/* Loader Init function succeeded? */
 };
 
 /*
@@ -261,16 +260,12 @@ static u32 ovly(void *priv_ref, u32 dsp_run_addr, u32 dsp_load_addr,
 static u32 mem_write(void *priv_ref, u32 dsp_add, void *pbuf,
 		     u32 ul_num_bytes, u32 mem_space);
 
-static u32 refs;		/* module reference count */
-
 /* Dynamic loader functions. */
 static struct node_ldr_fxns nldr_fxns = {
 	nldr_allocate,
 	nldr_create,
 	nldr_delete,
-	nldr_exit,
 	nldr_get_fxn_addr,
-	nldr_init,
 	nldr_load,
 	nldr_unload,
 };
@@ -1339,7 +1334,6 @@ int node_create_mgr(struct node_mgr **node_man,
 	nldr_attrs_obj.write = mem_write;
 	nldr_attrs_obj.dsp_word_size = node_mgr_obj->dsp_word_size;
 	nldr_attrs_obj.dsp_mau_size = node_mgr_obj->dsp_mau_size;
-	node_mgr_obj->loader_init = node_mgr_obj->nldr_fxns.init();
 	status = node_mgr_obj->nldr_fxns.create(&node_mgr_obj->nldr_obj,
 			hdev_obj,
 			&nldr_attrs_obj);
@@ -1566,16 +1560,6 @@ int node_enum_nodes(struct node_mgr *hnode_mgr, void **node_tab,
 	mutex_unlock(&hnode_mgr->node_mgr_lock);
 func_end:
 	return status;
-}
-
-/*
- *  ======== node_exit ========
- *  Purpose:
- *      Discontinue usage of NODE module.
- */
-void node_exit(void)
-{
-	refs--;
 }
 
 /*
@@ -1849,18 +1833,6 @@ enum node_type node_get_type(struct node_object *hnode)
 			node_type = hnode->ntype;
 	}
 	return node_type;
-}
-
-/*
- *  ======== node_init ========
- *  Purpose:
- *      Initialize the NODE module.
- */
-bool node_init(void)
-{
-	refs++;
-
-	return true;
 }
 
 /*
@@ -2530,9 +2502,6 @@ static void delete_node_mgr(struct node_mgr *hnode_mgr)
 		/* Delete the loader */
 		if (hnode_mgr->nldr_obj)
 			hnode_mgr->nldr_fxns.delete(hnode_mgr->nldr_obj);
-
-		if (hnode_mgr->loader_init)
-			hnode_mgr->nldr_fxns.exit();
 
 		kfree(hnode_mgr);
 	}
