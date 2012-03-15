@@ -92,6 +92,11 @@ config ANDROID_PM
 	help
 	  Enable the Android PM support.
 
+config HAS_WAKELOCK
+	bool "Enable wake lock compatibility"
+	depends on PM && PM_SLEEP
+	default n
+
 endif # if ANDROID
 
 endmenu
