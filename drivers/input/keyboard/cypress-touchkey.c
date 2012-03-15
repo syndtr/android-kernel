@@ -25,8 +25,9 @@
 #include <linux/interrupt.h>
 #include <linux/delay.h>
 #include <linux/input.h>
-#include <linux/earlysuspend.h>
 #include <linux/input/cypress-touchkey.h>
+
+#include "../../staging/android/android_pm.h"
 
 #define SCANCODE_MASK		0x07
 #define UPDOWN_EVENT_MASK	0x08
@@ -44,7 +45,6 @@ struct cypress_touchkey_devdata {
 	struct i2c_client *client;
 	struct input_dev *input_dev;
 	struct touchkey_platform_data *pdata;
-	struct early_suspend early_suspend;
 	u8 backlight_on;
 	u8 backlight_off;
 	bool is_dead;
@@ -260,16 +260,15 @@ static irqreturn_t touchkey_interrupt_handler(int irq, void *touchkey_devdata)
 	return IRQ_WAKE_THREAD;
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void cypress_touchkey_early_suspend(struct early_suspend *h)
+#ifdef CONFIG_PM_SLEEP
+static int cypress_touchkey_suspend(struct device *dev)
 {
-	struct cypress_touchkey_devdata *devdata =
-		container_of(h, struct cypress_touchkey_devdata, early_suspend);
+	struct cypress_touchkey_devdata *devdata = devdata_led;
 
 	devdata->is_powering_on = true;
 
 	if (unlikely(devdata->is_dead))
-		return;
+		return 0;
 
 	disable_irq(devdata->client->irq);
 
@@ -277,12 +276,13 @@ static void cypress_touchkey_early_suspend(struct early_suspend *h)
 		devdata->pdata->touchkey_onoff(TOUCHKEY_OFF);
 
 	all_keys_up(devdata);
+
+	return 0;
 }
 
-static void cypress_touchkey_early_resume(struct early_suspend *h)
+static int cypress_touchkey_resume(struct device *dev)
 {
-	struct cypress_touchkey_devdata *devdata =
-		container_of(h, struct cypress_touchkey_devdata, early_suspend);
+	struct cypress_touchkey_devdata *devdata = devdata_led;
 	
 	msleep(1);
 
@@ -300,8 +300,18 @@ static void cypress_touchkey_early_resume(struct early_suspend *h)
 		dev_err(&devdata->client->dev,"%s: Touch Key led ON ret = %d\n",__func__, ret);
 	}
 	devdata->is_delay_led_on = false;
+
+	return 0;
 }
 #endif
+
+STATIC_ANDROID_PM_OPS(cypress_touchkey_apm_ops, cypress_touchkey_suspend, cypress_touchkey_resume);
+
+static const struct dev_pm_ops cypress_touchkey_pm_ops = {
+#ifndef CONFIG_ANDROID_PM
+	SET_SYSTEM_SLEEP_PM_OPS(cypress_touchkey_suspend, cypress_touchkey_resume)
+#endif
+};
 
 static DEVICE_ATTR(brightness, 0660, NULL,touch_led_control);
 static DEVICE_ATTR(enable_disable, 0660, NULL,touch_control_enable_disable);
@@ -408,13 +418,9 @@ static int cypress_touchkey_probe(struct i2c_client *client,
 		goto err_req_irq;
 	}
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	devdata->early_suspend.suspend = cypress_touchkey_early_suspend;
-	devdata->early_suspend.resume = cypress_touchkey_early_resume;
-	register_early_suspend(&devdata->early_suspend);
-#endif
-
 	devdata->is_powering_on = false;
+
+	android_pm_enable(dev, &cypress_touchkey_apm_ops);
 
 	return 0;
 
@@ -436,7 +442,8 @@ static int __devexit i2c_touchkey_remove(struct i2c_client *client)
 {
 	struct cypress_touchkey_devdata *devdata = i2c_get_clientdata(client);
 
-	unregister_early_suspend(&devdata->early_suspend);
+	android_pm_disable(&client->dev);
+
 	/* If the device is dead IRQs are disabled, we need to rebalance them */
 	if (unlikely(devdata->is_dead))
 		enable_irq(client->irq);
@@ -458,6 +465,7 @@ MODULE_DEVICE_TABLE(i2c, cypress_touchkey_id);
 struct i2c_driver touchkey_i2c_driver = {
 	.driver = {
 		.name = DEVICE_NAME,
+		.pm = &cypress_touchkey_pm_ops,
 	},
 	.id_table = cypress_touchkey_id,
 	.probe = cypress_touchkey_probe,
