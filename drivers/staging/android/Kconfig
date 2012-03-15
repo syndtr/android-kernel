@@ -85,6 +85,13 @@ config ANDROID_ALARM_OLDDRV_COMPAT
 	  older out-of-tree drivers that use the Android Alarm
 	  in-kernel API. This will be removed eventually.
 
+config ANDROID_PM
+	bool "Android PM support"
+	depends on PM && PM_SLEEP
+	default n
+	help
+	  Enable the Android PM support.
+
 endif # if ANDROID
 
 endmenu
