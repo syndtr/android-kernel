@@ -22,7 +22,8 @@
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include <linux/workqueue.h>
-#include <linux/earlysuspend.h>
+
+#include "../../staging/android/android_pm.h"
 
 /* Version */
 #define MXT_VER_20		20
@@ -265,10 +266,9 @@ struct mxt_data {
 	struct mutex mutex;
 	bool is_started;
 	atomic_t refcnt;
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif
 };
+
+STATIC_ANDROID_PM_OPS_PROTO(mxt_apm_ops);
 
 static bool mxt_object_readable(unsigned int type)
 {
@@ -1135,9 +1135,6 @@ static void mxt_input_close(struct input_dev *dev)
 		mxt_stop(data);
 }
 
-static void mxt_earlysuspend(struct early_suspend *h);
-static void mxt_lateresume(struct early_suspend *h);
-
 static int __devinit mxt_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
@@ -1235,13 +1232,8 @@ static int __devinit mxt_probe(struct i2c_client *client,
 	if (error)
 		goto err_unregister_device;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	data->early_suspend.suspend = mxt_earlysuspend;
-	data->early_suspend.resume = mxt_lateresume;
-	data->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB;
-	register_early_suspend(&data->early_suspend);
-#endif
 	mutex_unlock(&data->mutex);
+	android_pm_enable(&client->dev, &mxt_apm_ops);
 	return 0;
 
 err_unregister_device:
@@ -1264,10 +1256,7 @@ static int __devexit mxt_remove(struct i2c_client *client)
 {
 	struct mxt_data *data = i2c_get_clientdata(client);
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&data->early_suspend);
-#endif
-
+	android_pm_disable(&client->dev);
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	free_irq(data->irq, data);
 	input_unregister_device(data->input_dev);
@@ -1277,20 +1266,22 @@ static int __devexit mxt_remove(struct i2c_client *client)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void mxt_earlysuspend(struct early_suspend *h)
+#ifdef CONFIG_PM_SLEEP
+static int mxt_suspend(struct device *dev)
 {
-	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mxt_data *data = i2c_get_clientdata(client);
 
 	mxt_stop(data);
-
 	mxt_onoff(data, 0);
+
+	return 0;
 }
 
-static void mxt_lateresume(struct early_suspend *h)
+static int mxt_resume(struct device *dev)
 {
-	struct mxt_data *data = container_of(h, struct mxt_data, early_suspend);
+	struct i2c_client *client = to_i2c_client(dev);
+	struct mxt_data *data = i2c_get_clientdata(client);
 	int ret = 0, retry = 10;
 
 	mxt_onoff(data, 1);
@@ -1307,46 +1298,18 @@ static void mxt_lateresume(struct early_suspend *h)
 
 	if (atomic_read(&data->refcnt) > 0)
 		mxt_start(data);
-}
-#else
-static int mxt_suspend(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct mxt_data *data = i2c_get_clientdata(client);
-
-	mxt_stop(data);
 
 	return 0;
 }
+#endif
 
-static int mxt_resume(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct mxt_data *data = i2c_get_clientdata(client);
-	int ret = 0, retry = 10;
-
-	/* Soft reset */
-	do {
-		if (ret)
-			msleep(200);
-		ret = mxt_write_object(data, MXT_GEN_COMMAND_T6,
-				MXT_COMMAND_RESET, 1);
-	} while(ret && retry--);
-
-	msleep(MXT_RESET_TIME);
-
-	if (atomic_read(&data->refcnt) > 0)
-		mxt_start(data);
-
-	return 0;
-}
+STATIC_ANDROID_PM_OPS(mxt_apm_ops, mxt_suspend, mxt_resume);
 
 static const struct dev_pm_ops mxt_pm_ops = {
-	.suspend	= mxt_suspend,
-	.resume		= mxt_resume,
+#ifndef CONFIG_ANDROID_PM
+	SET_SYSTEM_SLEEP_PM_OPS(mxt_suspend, mxt_resume)
+#endif
 };
-#endif
-#endif
 
 static const struct i2c_device_id mxt_id[] = {
 	{ "qt602240_ts", 0 },
@@ -1360,9 +1323,7 @@ static struct i2c_driver mxt_driver = {
 	.driver = {
 		.name	= "atmel_mxt_ts",
 		.owner	= THIS_MODULE,
-#if defined(CONFIG_PM) && !defined(CONFIG_HAS_EARLYSUSPEND)
 		.pm	= &mxt_pm_ops,
-#endif
 	},
 	.probe		= mxt_probe,
 	.remove		= __devexit_p(mxt_remove),
