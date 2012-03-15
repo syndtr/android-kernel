@@ -44,6 +44,8 @@
 #include <linux/console.h>
 #include <linux/mutex.h>
 
+#include "../../staging/android/android_pm.h"
+
 #if defined(DEBUG)
 #define	PVR_DEBUG DEBUG
 #undef DEBUG
@@ -315,8 +317,7 @@ S3CLFB_ERROR S3CLFBUnblankDisplay(S3CLFB_DEVINFO *psDevInfo)
 	return (S3CLFB_OK);
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-
+#ifdef CONFIG_PM_SLEEP
 static void S3CLFBBlankDisplay(S3CLFB_DEVINFO *psDevInfo)
 {
 	S3CLFB_CONSOLE_LOCK();
@@ -324,7 +325,7 @@ static void S3CLFBBlankDisplay(S3CLFB_DEVINFO *psDevInfo)
 	S3CLFB_CONSOLE_UNLOCK();
 }
 
-static void S3CLFBEarlySuspendHandler(struct early_suspend *h)
+static int s3clfb_suspend(struct device *dev)
 {
 	unsigned uiMaxFBDevIDPlusOne = S3CLFBMaxFBDevIDPlusOne();
 	unsigned i;
@@ -339,9 +340,11 @@ static void S3CLFBEarlySuspendHandler(struct early_suspend *h)
 			S3CLFBBlankDisplay(psDevInfo);
 		}
 	}
+
+	return 0;
 }
 
-static void S3CLFBEarlyResumeHandler(struct early_suspend *h)
+static int s3clfb_resume(struct device *dev)
 {
 	unsigned uiMaxFBDevIDPlusOne = S3CLFBMaxFBDevIDPlusOne();
 	unsigned i;
@@ -356,9 +359,10 @@ static void S3CLFBEarlyResumeHandler(struct early_suspend *h)
 			S3CLFBAtomicBoolSet(&psDevInfo->sEarlySuspendFlag, S3CLFB_FALSE);
 		}
 	}
-}
 
-#endif 
+	return 0;
+}
+#endif
 
 S3CLFB_ERROR S3CLFBEnableLFBEventNotification(S3CLFB_DEVINFO *psDevInfo)
 {
@@ -421,6 +425,8 @@ S3CLFB_ERROR S3CLFBDisableLFBEventNotification(S3CLFB_DEVINFO *psDevInfo)
 	return (S3CLFB_OK);
 }
 
+STATIC_ANDROID_PM_OPS(s3clfb_apm_ops, s3clfb_suspend, s3clfb_resume);
+
 static int __devinit s3clfb_probe(struct platform_device *pdev)
 {
 	if(S3CLFBInit() != S3CLFB_OK)
@@ -429,11 +435,15 @@ static int __devinit s3clfb_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	android_pm_enable(&pdev->dev, &s3clfb_apm_ops);
+
 	return 0;
 }
 
 static int __devexit s3clfb_remove(struct platform_device *pdev)
 {
+	android_pm_disable(&pdev->dev);
+
 	if(S3CLFBDeInit() != S3CLFB_OK)
 	{
 		printk(KERN_ERR DRIVER_PREFIX ": %s: S3CLFBDeInit failed\n", __FUNCTION__);
@@ -441,6 +451,12 @@ static int __devexit s3clfb_remove(struct platform_device *pdev)
 	
 	return 0;
 }
+
+static const struct dev_pm_ops s3clfb_pm_ops = {
+#ifndef CONFIG_ANDROID_PM
+	SET_SYSTEM_SLEEP_PM_OPS(s3clfb_suspend, s3clfb_resume)
+#endif
+};
 
 static struct platform_driver s3clfb_driver = {
 	.probe = s3clfb_probe,

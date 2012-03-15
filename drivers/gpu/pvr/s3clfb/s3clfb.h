@@ -194,12 +194,7 @@ typedef struct S3CLFB_DEVINFO_TAG
 	
 	S3CLFB_ATOMIC_INT	sBlankEvents;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	
 	S3CLFB_ATOMIC_BOOL	sEarlySuspendFlag;
-
-	struct early_suspend    sEarlySuspend;
-#endif
 
 }  S3CLFB_DEVINFO;
 
