@@ -25,12 +25,13 @@
 #include <linux/interrupt.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
-#include <linux/earlysuspend.h>
 #include <linux/delay.h>
 
 #include <mach/map.h>
 #include <plat/regs-fb-v4.h>
 #include <plat/fb.h>
+
+#include "../staging/android/android_pm.h"
 
 /* This driver will export a number of framebuffer interfaces depending
  * on the configuration passed in via the platform data. Each fb instance
@@ -68,6 +69,8 @@ struct s3c_fb;
 #define VIDOSD_B(win, variant) (OSD_BASE(win, variant) + 0x04)
 #define VIDOSD_C(win, variant) (OSD_BASE(win, variant) + 0x08)
 #define VIDOSD_D(win, variant) (OSD_BASE(win, variant) + 0x0C)
+
+STATIC_ANDROID_PM_OPS_PROTO(s3c_fb_apm_ops);
 
 /**
  * struct s3c_fb_variant - fb variant information
@@ -224,10 +227,6 @@ struct s3c_fb {
 	struct regulator	*pd;
 	struct regulator	*vlcd;
 	struct regulator	*vcc_lcd;
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend	early_suspend;
-#endif
 };
 
 /**
@@ -1418,9 +1417,6 @@ static void s3c_fb_regulator_disable(struct s3c_fb *sfb)
 
 }
 
-static void s3c_fb_earlysuspend(struct early_suspend *h);
-static void s3c_fb_lateresume(struct early_suspend *h);
-
 static int __devinit s3c_fb_probe(struct platform_device *pdev)
 {
 	const struct platform_device_id *platid;
@@ -1567,13 +1563,7 @@ static int __devinit s3c_fb_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sfb);
 	pm_runtime_put_sync(sfb->dev);
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	sfb->early_suspend.suspend = s3c_fb_earlysuspend;
-	sfb->early_suspend.resume = s3c_fb_lateresume;
-	sfb->early_suspend.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 5;
-	register_early_suspend(&sfb->early_suspend);
-#endif
+	android_pm_enable(sfb->dev, &s3c_fb_apm_ops);
 
 	return 0;
 
@@ -1618,10 +1608,7 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 	struct s3c_fb *sfb = platform_get_drvdata(pdev);
 	int win;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	unregister_early_suspend(&sfb->early_suspend);
-#endif
-
+	android_pm_disable(sfb->dev);
 	pm_runtime_get_sync(sfb->dev);
 
 	for (win = 0; win < S3C_FB_MAX_WIN; win++)
@@ -1652,9 +1639,11 @@ static int __devexit s3c_fb_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static void s3c_fb_do_suspend(struct s3c_fb *sfb)
+#ifdef CONFIG_PM_SLEEP
+static int s3c_fb_suspend(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
+	struct s3c_fb *sfb = platform_get_drvdata(pdev);
 	struct s3c_fb_win *win;
 	int win_no;
 
@@ -1676,10 +1665,14 @@ static void s3c_fb_do_suspend(struct s3c_fb *sfb)
 
 	disable_irq(sfb->irq_no);
 	s3c_fb_regulator_disable(sfb);
+
+	return 0;
 }
 
-static void s3c_fb_do_resume(struct s3c_fb *sfb)
+static int s3c_fb_resume(struct device *dev)
 {
+	struct platform_device *pdev = to_platform_device(dev);
+	struct s3c_fb *sfb = platform_get_drvdata(pdev);
 	struct s3c_fb_platdata *pd = sfb->pdata;
 	struct s3c_fb_win *win;
 	int win_no;
@@ -1727,45 +1720,9 @@ static void s3c_fb_do_resume(struct s3c_fb *sfb)
 	writel(VIDINTCON1_INT_FIFO | VIDINTCON1_INT_FRAME | VIDINTCON1_INT_I180,
 	       sfb->regs + VIDINTCON1);
 	enable_irq(sfb->irq_no);
-}
-#endif
-
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void s3c_fb_earlysuspend(struct early_suspend *h)
-{
-	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
-
-	s3c_fb_do_suspend(sfb);
-}
-
-static void s3c_fb_lateresume(struct early_suspend *h)
-{
-	struct s3c_fb *sfb = container_of(h, struct s3c_fb, early_suspend);
-
-	s3c_fb_do_resume(sfb);
-}
-#else
-#ifdef CONFIG_PM_SLEEP
-static int s3c_fb_suspend(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-
-	s3c_fb_do_suspend(sfb);
 
 	return 0;
 }
-
-static int s3c_fb_resume(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct s3c_fb *sfb = platform_get_drvdata(pdev);
-
-	s3c_fb_do_resume(sfb);
-
-	return 0;
-}
-#endif
 #endif
 
 #ifdef CONFIG_PM_RUNTIME
@@ -2121,8 +2078,10 @@ static struct platform_device_id s3c_fb_driver_ids[] = {
 };
 MODULE_DEVICE_TABLE(platform, s3c_fb_driver_ids);
 
+STATIC_ANDROID_PM_OPS(s3c_fb_apm_ops, s3c_fb_suspend, s3c_fb_resume);
+
 static const struct dev_pm_ops s3cfb_pm_ops = {
-#ifndef CONFIG_HAS_EARLYSUSPEND
+#ifndef CONFIG_ANDROID_PM
 	SET_SYSTEM_SLEEP_PM_OPS(s3c_fb_suspend, s3c_fb_resume)
 #endif
 	SET_RUNTIME_PM_OPS(s3c_fb_runtime_suspend, s3c_fb_runtime_resume,
