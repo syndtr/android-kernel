@@ -50,6 +50,8 @@
 #include <bcmutils.h>
 #include <bcmendian.h>
 
+#include "../../../staging/android/android_pm.h"
+
 #include <proto/ethernet.h>
 #include <dngl_stats.h>
 #include <dhd.h>
@@ -153,11 +155,10 @@ print_tainted()
 extern wl_iw_extra_params_t  g_wl_iw_params;
 #endif /* defined(CONFIG_WIRELESS_EXT) */
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
-#include <linux/earlysuspend.h>
+#if defined(CONFIG_ANDROID_PM)
 extern int dhdcdc_set_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint len);
 extern int dhd_get_dtim_skip(dhd_pub_t *dhd);
-#endif /* defined(CONFIG_HAS_EARLYSUSPEND) */
+#endif /* defined(CONFIG_ANDROID_PM) */
 
 #ifdef PKT_FILTER_SUPPORT
 extern void dhd_pktfilter_offload_set(dhd_pub_t * dhd, char *arg);
@@ -270,9 +271,6 @@ typedef struct dhd_info {
 	atomic_t pend_8021x_cnt;
 	dhd_attach_states_t dhd_state;
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	struct early_suspend early_suspend;
-#endif /* CONFIG_HAS_EARLYSUSPEND */
 } dhd_info_t;
 
 /* Definitions to provide path to the firmware and nvram
@@ -522,7 +520,7 @@ static void dhd_set_packet_filter(int value, dhd_pub_t *dhd)
 #endif
 }
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_ANDROID_PM)
 static int dhd_set_suspend(int value, dhd_pub_t *dhd)
 {
 	int power_mode = PM_MAX;
@@ -598,26 +596,32 @@ static void dhd_suspend_resume_helper(struct dhd_info *dhd, int val)
 	DHD_OS_WAKE_UNLOCK(dhdp);
 }
 
-static void dhd_early_suspend(struct early_suspend *h)
+static int dhd_early_suspend(struct device *dev)
 {
-	struct dhd_info *dhd = container_of(h, struct dhd_info, early_suspend);
+	struct dhd_info *dhd = (struct dhd_info *)dev;
 
 	DHD_TRACE(("%s: enter\n", __FUNCTION__));
 
 	if (dhd)
 		dhd_suspend_resume_helper(dhd, 1);
+
+	return 0;
 }
 
-static void dhd_late_resume(struct early_suspend *h)
+static int dhd_late_resume(struct device *dev)
 {
-	struct dhd_info *dhd = container_of(h, struct dhd_info, early_suspend);
+	struct dhd_info *dhd = (struct dhd_info *)dev;
 
 	DHD_TRACE(("%s: enter\n", __FUNCTION__));
 
 	if (dhd)
 		dhd_suspend_resume_helper(dhd, 0);
+
+	return 0;
 }
-#endif /* defined(CONFIG_HAS_EARLYSUSPEND) */
+
+STATIC_ANDROID_PM_OPS(dhd_apm_ops, dhd_early_suspend, dhd_late_resume);
+#endif /* defined(CONFIG_ANDROID_PM) */
 
 /*
  * Generalized timeout mechanism.  Uses spin sleep with exponential back-off until
@@ -2671,11 +2675,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	register_pm_notifier(&dhd_sleep_pm_notifier);
 #endif /*  (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 27)) && defined(CONFIG_PM_SLEEP) */
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	dhd->early_suspend.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 20;
-	dhd->early_suspend.suspend = dhd_early_suspend;
-	dhd->early_suspend.resume = dhd_late_resume;
-	register_early_suspend(&dhd->early_suspend);
+#ifdef CONFIG_ANDROID_PM
+	android_pm_enable((struct device *)dhd, &dhd_apm_ops);
 	dhd_state |= DHD_ATTACH_STATE_EARLYSUSPEND_DONE;
 #endif
 
@@ -3470,12 +3471,11 @@ void dhd_detach(dhd_pub_t *dhdp)
 	unregister_inetaddr_notifier(&dhd_notifier);
 #endif /* ARP_OFFLOAD_SUPPORT */
 
-#if defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_ANDROID_PM)
 	if (dhd->dhd_state & DHD_ATTACH_STATE_EARLYSUSPEND_DONE) {
-		if (dhd->early_suspend.suspend)
-			unregister_early_suspend(&dhd->early_suspend);
+		android_pm_disable((struct device *)dhd);
 	}
-#endif /* defined(CONFIG_HAS_EARLYSUSPEND) */
+#endif /* defined(CONFIG_ANDROID_PM) */
 
 #if defined(CONFIG_WIRELESS_EXT)
 	if (dhd->dhd_state & DHD_ATTACH_STATE_WL_ATTACH) {
@@ -4154,13 +4154,13 @@ int net_os_set_suspend_disable(struct net_device *dev, int val)
 int net_os_set_suspend(struct net_device *dev, int val)
 {
 	int ret = 0;
-#if defined(CONFIG_HAS_EARLYSUSPEND)
+#if defined(CONFIG_ANDROID_PM)
 	dhd_info_t *dhd = *(dhd_info_t **)netdev_priv(dev);
 
 	if (dhd) {
 		ret = dhd_set_suspend(val, &dhd->pub);
 	}
-#endif /* defined(CONFIG_HAS_EARLYSUSPEND) */
+#endif /* defined(CONFIG_ANDROID_PM) */
 	return ret;
 }
 
