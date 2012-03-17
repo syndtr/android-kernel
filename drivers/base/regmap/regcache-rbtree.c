@@ -375,10 +375,6 @@ static int regcache_rbtree_sync(struct regmap *map)
 			val = regcache_rbtree_get_register(rbnode, i,
 							   map->cache_word_size);
 
-			/* Skip volatile registaers */
-			if (regmap_volatile(map, regtmp))
-				continue;
-
 			/* Is this the hardware default?  If so skip. */
 			ret = regcache_lookup_reg(map, i);
 			if (ret > 0 && val == map->reg_defaults[ret].def)
