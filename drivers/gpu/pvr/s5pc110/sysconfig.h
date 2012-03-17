@@ -22,34 +22,44 @@
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
  * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
  *
- ******************************************************************************/
+*****************************************************************************/
 
 #if !defined(__SOCCONFIG_H__)
 #define __SOCCONFIG_H__
 
-#define VS_PRODUCT_NAME		"S3C"
+#define VS_PRODUCT_NAME	"s5pc110"
 
-#define SYS_SGX_CLOCK_SPEED	200000000
+#define SYS_SGX_USSE_COUNT					(1)
 
-#define SYS_SGX_HWRECOVERY_TIMEOUT_FREQ	(100)
-#define SYS_SGX_PDS_TIMER_FREQ		(1000)
+#define SGX_REG_SIZE 	0x4000
+#define SGX_SP_SIZE		(0x10000-SGX_REG_SIZE)
 
-#ifndef SYS_SGX_ACTIVE_POWER_LATENCY_MS
-#define SYS_SGX_ACTIVE_POWER_LATENCY_MS	(500)
+/* Set PCI vendor ID, device ID to 0, the device is not a PCI device ! */
+#define SYS_SGX_DEV_VENDOR_ID		        0
+#define SYS_SGX_DEV_DEVICE_ID		        0
+
+#if defined(SGX_FEATURE_HOST_PORT)
+	/* FIXME: change these dummy values if host port is needed */
+	#define SYS_SGX_HP_SIZE		0x0
+	/* device virtual address of host port base */
+	#define SYS_SGX_HOSTPORT_BASE_DEVVADDR 0x0
+	#if defined(FIX_HW_BRN_22997) && defined(FIX_HW_BRN_23030)
+		/* 
+			SYS_SGX_HOSTPORT_BASE_DEVVADDR + SYS_SGX_HOSTPORT_BRN23030_OFFSET 
+			has to be an invalid SGX virtual address 
+		*/
+		#define SYS_SGX_HOSTPORT_BRN23030_OFFSET 0x0
+	#endif
 #endif
 
-#define SGX_REGS_SIZE		SZ_16M
+/*****************************************************************************
+ * system specific data structures
+ *****************************************************************************/
 
-#define DEVICE_SGX_INTERRUPT	(1<<0)
-#define DEVICE_MSVDX_INTERRUPT	(1<<1)
-#define DEVICE_DISP_INTERRUPT	(1<<2)
-
-#if defined(__linux__)
 #if defined(PVR_LDM_PLATFORM_PRE_REGISTERED_DEV)
 #define	SYS_SGX_DEV_NAME	PVR_LDM_PLATFORM_PRE_REGISTERED_DEV
 #else
 #define	SYS_SGX_DEV_NAME	"s5pc110-g3d"
 #endif	
-#endif	
  
-#endif	
+#endif	/* __SOCCONFIG_H__ */

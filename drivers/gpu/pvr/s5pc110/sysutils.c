@@ -22,10 +22,15 @@
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
  * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
  *
- ******************************************************************************/
+*****************************************************************************/
 
-#if defined(__linux__)
-#include "sysutils_linux.c"
-#endif
+#include "services_headers.h"
+#include "sysinfo.h"
+
+
+
+/* SYSTEM SPECIFIC FUNCTIONS */
+
+
 
 
