@@ -76,11 +76,13 @@ struct binder_proc {
 
 	pid_t pid;
 
-	atomic_t proc_loopers, requested_loopers, registered_loopers;
+	atomic_t busy_threads, proc_loopers, requested_loopers, registered_loopers;
 	int max_threads;
 
+	spinlock_t reclaim_lock;
+	struct list_head reclaim_list;	// deferred release list for objects
+
 	struct dentry *proc_dir, *thread_dir, *obj_dir;
-	struct list_head garbage_list;	// garbage collected when proc is released
 };
 
 struct binder_thread {
@@ -91,7 +93,6 @@ struct binder_thread {
 
 	int state;
 	int non_block;
-	unsigned int last_error;
 
 	int pending_replies;
 	struct list_head incoming_transactions;
@@ -185,13 +186,6 @@ struct slob_buf {
 	char data[0];
 };
 
-struct debugfs_priv {
-	msg_queue_id owner;
-	struct binder_proc *proc;
-	unsigned long data;
-	struct list_head list;
-};
-
 
 static struct binder_obj *context_mgr_obj;	// compat: is context mgr necessary?
 static uid_t context_mgr_uid = -1;
@@ -199,9 +193,9 @@ static uid_t context_mgr_uid = -1;
 static struct dentry *debugfs_root;
 
 
-static struct debugfs_priv *debugfs_new_proc(struct binder_proc *proc);
-static struct debugfs_priv *debugfs_new_thread(struct binder_proc *proc, struct binder_thread *thread);
-static struct debugfs_priv *debugfs_new_obj(struct binder_proc *proc, struct binder_obj *obj);
+static int debugfs_new_proc(struct binder_proc *proc);
+static int debugfs_new_thread(struct binder_proc *proc, struct binder_thread *thread);
+static int debugfs_new_obj(struct binder_proc *proc, struct binder_obj *obj);
 
 
 // TODO: to be deleted
@@ -335,7 +329,6 @@ static struct binder_obj *_binder_new_obj(struct binder_proc *proc, msg_queue_id
 	struct rb_node *parent = NULL;
 	struct binder_obj *obj, *new_obj;
 	int r;
-	struct debugfs_priv *priv;
 
 	new_obj = kmalloc(sizeof(*obj), GFP_KERNEL);
 	if (!new_obj)
@@ -372,21 +365,9 @@ static struct binder_obj *_binder_new_obj(struct binder_proc *proc, msg_queue_id
 
 	new_obj->ref = proc->obj_seq++;
 	hlist_add_head(&new_obj->hash_node, &proc->obj_hash[new_obj->ref % OBJ_HASH_BUCKET_SIZE]);
-
 	spin_unlock(&proc->obj_lock);
 
-	if (!(priv = debugfs_new_obj(proc, new_obj))) {
-		spin_lock(&proc->obj_lock);
-		rb_erase(&new_obj->rb_node, &proc->obj_tree);
-		hlist_del(&new_obj->hash_node);
-		spin_unlock(&proc->obj_lock);
-		kfree(new_obj);
-		return NULL;
-	}
-	spin_lock(&proc->lock);
-	list_add(&priv->list, &proc->garbage_list);
-	spin_unlock(&proc->lock);
-
+	debugfs_new_obj(proc, new_obj);
 	return new_obj;
 }
 
@@ -517,7 +498,8 @@ static struct bcmd_msg *binder_realloc_msg(struct bcmd_msg *msg, size_t data_siz
 	return binder_alloc_msg(data_size, offsets_size);
 }
 
-static inline int binder_inform_obj(struct binder_obj *obj, unsigned int cmd)
+// used by the queue owner
+static inline int _binder_write_cmd(struct msg_queue *q, void *binder, void *cookie, unsigned int cmd)
 {
 	struct bcmd_msg *msg; 
 	int r;
@@ -527,10 +509,10 @@ static inline int binder_inform_obj(struct binder_obj *obj, unsigned int cmd)
 		return -ENOMEM;
 
 	msg->type = cmd;
-	msg->binder = obj->binder;
-	msg->cookie = obj->cookie;
+	msg->binder = binder;
+	msg->cookie = cookie;
 
-	r = bcmd_write_msg(obj->owner, msg);
+	r = _bcmd_write_msg(q, msg);
 	if (r < 0) {
 		kfree(msg);
 		return r;
@@ -539,9 +521,63 @@ static inline int binder_inform_obj(struct binder_obj *obj, unsigned int cmd)
 	return 0;
 }
 
+// used by any process
+static inline int binder_write_cmd(msg_queue_id q, void *binder, void *cookie, unsigned int cmd)
+{
+	struct bcmd_msg *msg; 
+	int r;
+
+	msg = binder_alloc_msg(0, 0);
+	if (!msg)
+		return -ENOMEM;
+
+	msg->type = cmd;
+	msg->binder = binder;
+	msg->cookie = cookie;
+
+	r = bcmd_write_msg(q, msg);
+	if (r < 0) {
+		kfree(msg);
+		return r;
+	}
+
+	return 0;
+}
+
+static inline int binder_inform_owner(struct binder_obj *obj, unsigned int cmd)
+{
+	return binder_write_cmd(obj->owner, obj->binder, obj->cookie, cmd);
+}
+
+static inline void binder_reclaim_obj(struct binder_proc *proc, struct binder_obj *obj)
+{
+	if (atomic_read(&proc->busy_threads) <= 1)
+		kfree(obj);
+	else {
+		spin_lock(&proc->reclaim_lock);
+		list_add(&obj->notifiers, &proc->reclaim_list);	// reuse notifiers entry
+		spin_unlock(&proc->reclaim_lock);
+	}
+}
+
+static inline void binder_reclaim_objs(struct binder_proc *proc)
+{
+	struct binder_obj *obj, *next;
+
+	spin_lock(&proc->reclaim_lock);
+	list_for_each_entry_safe(obj, next, &proc->reclaim_list, notifiers) {
+		list_del(&obj->notifiers);
+		kfree(obj);
+	}
+	spin_unlock(&proc->reclaim_lock);
+}
+
 static int _binder_free_obj(struct binder_proc *proc, struct binder_obj *obj)
 {
-	debugfs_remove(obj->info_node);
+	int r = 0;
+
+	if (obj->info_node)
+		debugfs_remove(obj->info_node);
 
 	if (OBJ_IS_BINDER(obj)) {
 		struct binder_notifier *notifier, *next;
@@ -553,14 +589,16 @@ static int _binder_free_obj(struct binder_proc *proc, struct binder_obj *obj)
 			if (!msg) {
 				msg = binder_alloc_msg(0, 0);
 				if (!msg) {
-					kfree(obj);
-					return -ENOMEM;
+					r = -ENOMEM;
+					kfree(notifier);
+					continue;
 				}
 			}
 
 			msg->type = BR_DEAD_BINDER;
 			msg->binder = obj->binder;
 			msg->cookie = notifier->cookie;
+			msg->reply_to = obj->owner;	// identify the owner
 			if (!bcmd_write_msg(notifier->to_notify, msg))
 				msg = NULL;
 
@@ -571,24 +609,72 @@ static int _binder_free_obj(struct binder_proc *proc, struct binder_obj *obj)
 	} else {
 		// reference - tell the owner we are no longer referencing the object
 		if (atomic_read(&obj->refs) > 0)
-			binder_inform_obj(obj, BC_RELEASE);
+			binder_inform_owner(obj, BC_RELEASE);
 	}
 
-	kfree(obj);
-	return 0;
+	binder_reclaim_obj(proc, obj);
+	return r;
 }
 
-static int binder_free_obj(struct binder_proc *proc, struct binder_obj *obj)
+static int binder_free_obj(struct binder_proc *proc, struct binder_obj *obj, int force)
 {	
 	spin_lock(&proc->obj_lock);
 	rb_erase(&obj->rb_node, &proc->obj_tree);
 	hlist_del(&obj->hash_node);
 	spin_unlock(&proc->obj_lock);
 
-	return _binder_free_obj(proc, obj);
+	if (!force)
+		return _binder_free_obj(proc, obj);
+
+	if (obj->info_node)
+		debugfs_remove(obj->info_node);
+	binder_reclaim_obj(proc, obj);
+	return 0;
 }
 
-static void drain_msg_queue(struct binder_proc *proc, struct msg_queue *q)
+static int clear_msg_buf(struct binder_proc *proc, struct bcmd_msg *msg)
+{
+	struct bcmd_msg_buf *mbuf = msg->buf;
+
+	if (mbuf->offsets_size > 0) {
+		struct flat_binder_object *bp;
+		size_t *p, *ep, off;
+		int n;
+
+		p = (size_t *)mbuf->offsets;
+		ep = (size_t *)((char *)mbuf->offsets + mbuf->offsets_size);
+		n = 0;
+
+		while (p < ep) {
+			off = *p++;
+			if (off + sizeof(*bp) > mbuf->data_size)
+				return -EINVAL;
+
+			bp = (struct flat_binder_object *)(mbuf->data + off);
+			switch (bp->type) {
+				case BINDER_TYPE_BINDER:
+				case BINDER_TYPE_HANDLE:
+					if (mbuf->owners[n] != msg_queue_id(proc->queue))
+						binder_write_cmd(mbuf->owners[n], bp->binder, bp->cookie, BC_RELEASE);
+					break;
+
+				case BINDER_TYPE_FD:
+					if (bp->binder)
+						fput(bp->binder);
+					break;
+
+				default:
+					break;
+			}
+
+			n++;
+		}
+	}
+
+	return 0;
+}
+
+static void clear_msg_queue(struct binder_proc *proc, struct msg_queue *q)
 {
 	struct list_head *entry;
 	struct bcmd_msg *msg;
@@ -596,11 +682,16 @@ static void drain_msg_queue(struct binder_proc *proc, struct msg_queue *q)
 	while ((entry = msg_queue_pop(q))) {
 		msg = container_of(entry, struct bcmd_msg, list);
 
-		//TODO: call free buffer
-		if ((msg->type == BC_TRANSACTION) && !(msg->flags & TF_ONE_WAY)) {
-			msg->type = BR_DEAD_REPLY;
-			if (!bcmd_write_msg(msg->reply_to, msg))
-				continue;
+		if (msg->type == BC_TRANSACTION) {
+			clear_msg_buf(proc, msg);
+
+			if (!(msg->flags & TF_ONE_WAY)) {
+				msg->type = BR_DEAD_REPLY;
+				if (!bcmd_write_msg(msg->reply_to, msg))
+					continue;
+			}
+		} else if (msg->type == BC_REPLY) {
+			clear_msg_buf(proc, msg);
 		} else if (msg->type == BC_CLEAR_DEATH_NOTIFICATION) {
 			struct binder_obj *obj;
 
@@ -631,7 +722,10 @@ static void thread_queue_release(struct msg_queue *q, void *data)
 	struct binder_proc *proc = thread->proc;
 	struct bcmd_msg *msg, *next;
 
-	drain_msg_queue(proc, q);
+	if (thread->info_node)
+		debugfs_remove(thread->info_node);
+
+	clear_msg_queue(proc, q);
 
 	list_for_each_entry_safe(msg, next, &thread->incoming_transactions, list) {
 		list_del(&msg->list);
@@ -646,8 +740,6 @@ static void thread_queue_release(struct msg_queue *q, void *data)
 	spin_unlock(&proc->lock);
 
 	kfree(thread);
-
-	// this has to be the last step as the last proc queue user will destroy the proc
 	put_msg_queue(proc->queue);
 }
 
@@ -656,9 +748,11 @@ static void proc_queue_release(struct msg_queue *q, void *data)
 	struct binder_proc *proc = data;
 	struct rb_node *n;
 	struct binder_obj *obj;
-	struct debugfs_priv *priv, *next;
 
-	drain_msg_queue(proc, q);
+	if (proc->proc_dir)
+		debugfs_remove_recursive(proc->proc_dir);
+
+	clear_msg_queue(proc, q);
 
 	// safe to free objs and send BR_DEAD_BINDER
 	while ((n = rb_first(&proc->obj_tree))) {
@@ -670,12 +764,6 @@ static void proc_queue_release(struct msg_queue *q, void *data)
 		_binder_free_obj(proc, obj);
 	}
 
-	// safe to do garbage collection now
-	list_for_each_entry_safe(priv, next, &proc->garbage_list, list) {
-		list_del(&priv->list);
-		kfree(priv);
-	}
-
 	if (proc->slob)
 		fast_slob_destroy(proc->slob);
 
@@ -685,7 +773,6 @@ static void proc_queue_release(struct msg_queue *q, void *data)
 static struct binder_proc *binder_new_proc(struct file *filp)
 {
 	struct binder_proc *proc;
-	struct debugfs_priv *priv;
 	int i;
 
 	proc = kmalloc(sizeof(*proc), GFP_KERNEL);
@@ -704,6 +791,7 @@ static struct binder_proc *binder_new_proc(struct file *filp)
 	proc->pid = task_tgid_vnr(current);
 	proc->max_threads = 0;
 
+	atomic_set(&proc->busy_threads, 0);
 	atomic_set(&proc->proc_loopers, 0);
 	atomic_set(&proc->requested_loopers, 0);
 	atomic_set(&proc->registered_loopers, 0);
@@ -718,15 +806,10 @@ static struct binder_proc *binder_new_proc(struct file *filp)
 	spin_lock_init(&proc->obj_lock);
 	proc->obj_tree.rb_node = NULL;
 
-	INIT_LIST_HEAD(&proc->garbage_list);
+	spin_lock_init(&proc->reclaim_lock);
+	INIT_LIST_HEAD(&proc->reclaim_list);
 
-	if (!(priv = debugfs_new_proc(proc))) {
-		// the queue release handler will free proc struct
-		free_msg_queue(proc->queue);
-		return NULL;
-	}
-	list_add(&priv->list, &proc->garbage_list);
-
+	debugfs_new_proc(proc);
 	return proc;
 }
 
@@ -735,7 +818,6 @@ static struct binder_thread *binder_new_thread(struct binder_proc *proc, struct 
 	struct binder_thread *new_thread, *thread;
 	struct rb_node **p = &proc->thread_tree.rb_node;
 	struct rb_node *parent = NULL;
-	struct debugfs_priv *priv;
 
 	new_thread = kmalloc(sizeof(*new_thread), GFP_KERNEL);
 	if (!new_thread)
@@ -749,17 +831,10 @@ static struct binder_thread *binder_new_thread(struct binder_proc *proc, struct 
 
 	new_thread->pid = pid;
 	new_thread->state = 0;
-	new_thread->last_error = 0;
 	new_thread->non_block = (filp->f_flags & O_NONBLOCK) ? 1 : 0;	// compat
 	new_thread->pending_replies = 0;
 	INIT_LIST_HEAD(&new_thread->incoming_transactions);
 	new_thread->proc = proc;
-
-	if (!(priv = debugfs_new_thread(proc, new_thread))) {
-		free_msg_queue(new_thread->queue);
-		kfree(new_thread);
-		return NULL;
-	}
 
 	spin_lock(&proc->lock);
 	while (*p) {
@@ -781,10 +856,9 @@ static struct binder_thread *binder_new_thread(struct binder_proc *proc, struct 
 
 	rb_link_node(&new_thread->rb_node, parent, p);
 	rb_insert_color(&new_thread->rb_node, &proc->thread_tree);
-
-	list_add(&priv->list, &proc->garbage_list);
 	spin_unlock(&proc->lock);
 
+	debugfs_new_thread(proc, new_thread);
 	return new_thread;
 }
 
@@ -817,7 +891,6 @@ static struct binder_thread *binder_get_thread(struct binder_proc *proc, struct 
 static int binder_free_thread(struct binder_proc *proc, struct binder_thread *thread)
 {
 	free_msg_queue(thread->queue);
-	debugfs_remove(thread->info_node);
 	return 0;
 }
 
@@ -826,14 +899,14 @@ static int binder_free_proc(struct binder_proc *proc)
 	struct rb_node *n;
 	struct binder_thread *thread;
 
-	free_msg_queue(proc->queue);
+	disable_msg_queue(proc->queue);
 
 	while ((n = rb_first(&proc->thread_tree))) {
 		thread = rb_entry(n, struct binder_thread, rb_node);
 		binder_free_thread(proc, thread);
 	}
 
-	debugfs_remove_recursive(proc->proc_dir);
+	free_msg_queue(proc->queue);
 	return 0;
 }
 
@@ -898,8 +971,7 @@ static inline int binder_release_obj(struct binder_proc *proc, struct binder_thr
 		}
 
 		// regardless it's an object or a reference, it should cease to exist now
-		// TODO: review the risk of deleting the object here
-		r = binder_free_obj(proc, obj);
+		r = binder_free_obj(proc, obj, 0);
 		if (r < 0)
 			return r;
 	}
@@ -909,9 +981,9 @@ static inline int binder_release_obj(struct binder_proc *proc, struct binder_thr
 
 static int bcmd_write_flat_obj(struct binder_proc *proc, struct binder_thread *thread, struct flat_binder_object *bp, msg_queue_id *owner)
 {
+	unsigned long type = bp->type;
 	struct binder_obj *obj;
 	struct file *file;
-	unsigned long type = bp->type;
 	int r;
 
 	switch (type) {
@@ -927,9 +999,11 @@ static int bcmd_write_flat_obj(struct binder_proc *proc, struct binder_thread *t
 
 			*owner = obj->owner;
 
-			r = binder_acquire_obj(proc, thread, obj);
-			if (r < 0)
-				return r;
+			if (type == BINDER_TYPE_BINDER) {
+				r = binder_acquire_obj(proc, thread, obj);
+				if (r < 0)
+					return r;
+			}
 			break;
 
 		case BINDER_TYPE_HANDLE:
@@ -942,9 +1016,11 @@ static int bcmd_write_flat_obj(struct binder_proc *proc, struct binder_thread *t
 			bp->cookie = obj->cookie;
 			*owner = obj->owner;
 
-			r = binder_inform_obj(obj, BC_ACQUIRE);
-			if (r < 0)
-				return r;
+			if (type == BINDER_TYPE_HANDLE) {
+				r = binder_inform_owner(obj, BC_ACQUIRE);
+				if (r < 0)
+					return r;
+			}
 			break;
 
 		case BINDER_TYPE_FD:
@@ -1001,7 +1077,7 @@ static int bcmd_read_flat_obj(struct binder_proc *proc, struct binder_thread *th
 					if (atomic_inc_return(&obj->refs) > 1) {
 						/* We aleady have a reference to the object, so tell
 						   the owner to decrease one reference */
-						r = binder_inform_obj(obj, BC_RELEASE);
+						r = binder_inform_owner(obj, BC_RELEASE);
 						if (r < 0)
 							return r;
 					}
@@ -1019,7 +1095,7 @@ static int bcmd_read_flat_obj(struct binder_proc *proc, struct binder_thread *th
 			}
 
 			fd_install(fd, file);
-			bp->handle = fd;	// TODO: fput() when free unread msg!!!
+			bp->handle = fd;
 			break;
 
 		default: 
@@ -1069,7 +1145,7 @@ static int bcmd_write_msg_buf(struct binder_proc *proc, struct binder_thread *th
 	2. A -> B -> C -> A. In this case, B's transaction is delivered to C's process queue, but C's transaction
            is delivered to thread A.
 
-   It doesn't impose above thread preference if a caller thread makes consective calls to more than one destination
+   It doesn't impose above thread preference if a caller thread makes consecutive calls to more than one destination
    before getting the reply back. For example, like in case 2, if A -> B -> C, and before getting reply back from B,
    A makes another call to C (A -> C), in which case, the second message is not guranteed to be delivered to thread
    C who received B's transaction (triggered by A's transaction).
@@ -1123,7 +1199,6 @@ static int bcmd_write_transaction(struct binder_proc *proc, struct binder_thread
 	struct bcmd_msg *msg;
 	msg_queue_id to_id;
 	void *binder, *cookie;
-	uint32_t err;
 
 	if (bcmd == BC_TRANSACTION) {
 		struct binder_obj *obj;
@@ -1133,20 +1208,17 @@ static int bcmd_write_transaction(struct binder_proc *proc, struct binder_thread
 		else
 			obj = binder_find_obj_by_ref(proc, tdata->target.handle);
 
-		if (!obj) {
-			err = BR_FAILED_REPLY;
-			goto failed_obj;
-		}
+		if (!obj)
+			goto failed_reply;
 
 		msg = binder_alloc_msg(tdata->data_size, tdata->offsets_size);
-		if (!msg) {
-			err = BR_FAILED_REPLY;
-			goto failed_msg;
-		}
+		if (!msg)
+			goto failed_reply;
 
 		to_id = obj->owner;
 		if (!(tdata->flags & TF_ONE_WAY)) {
-			bcmd_fill_traces(proc, thread, msg);
+			if (bcmd_fill_traces(proc, thread, msg) < 0)
+				goto failed_msg;
 			bcmd_lookup_caller(proc, thread, &to_id);
 		}
 
@@ -1158,10 +1230,9 @@ static int bcmd_write_transaction(struct binder_proc *proc, struct binder_thread
 		   to check its validity, in particular if there are more than one pending
 		   incoming transactions on the stack waiting to be replied. See comments
 		   in bcmd_read_transaction() */
-		if (list_empty(&thread->incoming_transactions)) {
-			err = BR_FAILED_REPLY;
-			goto failed_transaction;
-		}
+		if (list_empty(&thread->incoming_transactions))
+			goto failed_reply;
+
 		msg = list_first_entry(&thread->incoming_transactions, struct bcmd_msg, list);
 		list_del(&msg->list);
 
@@ -1169,10 +1240,8 @@ static int bcmd_write_transaction(struct binder_proc *proc, struct binder_thread
 		binder = cookie = NULL;		// compat
 
 		msg = binder_realloc_msg(msg, tdata->data_size, tdata->offsets_size);
-		if (!msg) {
-			err = BR_FAILED_REPLY;
-			goto failed_msg;
-		}
+		if (!msg)
+			goto failed_reply;
 	}
 
 	msg->type = bcmd;
@@ -1185,42 +1254,34 @@ static int bcmd_write_transaction(struct binder_proc *proc, struct binder_thread
 	msg->reply_to = msg_queue_id(thread->queue);	// reply queue & indicating source
 
 	if (tdata->data_size > 0) {
-		if (bcmd_write_msg_buf(proc, thread, msg->buf, tdata) < 0) {
-			err = BR_FAILED_REPLY;
-			goto failed_load;
-		}
+		if (bcmd_write_msg_buf(proc, thread, msg->buf, tdata) < 0)
+			goto failed_msg;
 	}
 	DUMP_MSG(proc->pid, thread->pid, 1, msg);
 
-	if (bcmd_write_msg(to_id, msg) < 0) {
-		err = BR_FAILED_REPLY;
+	/* compat: send BR_TRANSACTION_COMPLETE to the calling thread. It has to be written to the
+	   thread queue after the message ('msg') has been assembled, so that the referencing commands
+	   (BR_*, done in bcmd_write_msg_buf()) are ahead of COMPLETE, but before 'msg' is written to
+	   the destination queue. If COMPLETE is written after that, there's a chance that the reply
+	   message (of 'msg') arrives earlier before COMPLETE is enqueued, in which case the framework
+	   will simply treat the reply message as the response and return immediately before draining
+	   COMPLETE. The COMPLETE message left behind will then mess up the next transaction. */
+	if (_binder_write_cmd(thread->queue, binder, cookie, BR_TRANSACTION_COMPLETE) < 0)
 		goto failed_write;
-	}
+
+	if (bcmd_write_msg(to_id, msg) < 0)
+		goto failed_write;
 
 	if (bcmd == BC_TRANSACTION && !(tdata->flags & TF_ONE_WAY))
 		thread->pending_replies++;
-
-	// compat: send BR_TRANSACTION_COMPLETE 
-	msg = binder_alloc_msg(0, 0);
-	if (!msg)
-		return -ENOMEM;
-
-	msg->type = BR_TRANSACTION_COMPLETE;
-	if (_bcmd_write_msg(thread->queue, msg) < 0) {
-		kfree(msg);
-		return -ENOMEM;
-	}
-
 	return 0;
 
 failed_write:
-failed_load:
-	kfree(msg);
+	clear_msg_buf(proc, msg);
 failed_msg:
-failed_transaction:
-failed_obj:
-	thread->last_error = err;
-	return -1;
+	kfree(msg);
+failed_reply:
+	return _binder_write_cmd(thread->queue, NULL, NULL, BR_FAILED_REPLY);
 }
 
 static int bcmd_write_free_buffer(struct binder_proc *proc, struct binder_thread *thread, void *uaddr)
@@ -1229,17 +1290,20 @@ static int bcmd_write_free_buffer(struct binder_proc *proc, struct binder_thread
 	struct slob_buf *sbuf;
 	int bucket;
 
-	if (!proc->slob || !proc->ustart || (unsigned long)uaddr < proc->ustart)
-		return -1;
+	if (!proc->slob || !proc->ustart || (unsigned long)uaddr < proc->ustart) {
+		printk("binder: pid %d (tid %d) trying to free an invalid buffer %p, slob %p, ustart %lx\n",
+			proc->pid, thread->pid, uaddr, proc->slob, proc->ustart);
+		return -EINVAL;
+	}
 
 	off = (unsigned long)uaddr - proc->ustart - (unsigned long)(((struct slob_buf *)0)->data);
 	sbuf = (struct slob_buf *)(proc->slob->start + off);
 
 	bucket = fast_slob_bucket(proc->slob, sbuf);
 	if (bucket < 0 || (sbuf->uaddr_data != (unsigned long)uaddr)) {
-		printk("binder: pid %d (tid %d) trying to free an invalid buffer %p, bucket %d, %lu\n",
-			proc->pid, thread->pid, uaddr, bucket, sbuf->uaddr_data);
-		return -1;
+		printk("binder: pid %d (tid %d) trying to free an invalid buffer %p, bucket %d, sbuf %p\n",
+			proc->pid, thread->pid, uaddr, bucket, sbuf);
+		return -EINVAL;
 	}
 
 	if (sbuf->offsets_size > 0) {
@@ -1283,35 +1347,29 @@ static int bcmd_write_acquire(struct binder_proc *proc, struct binder_thread *th
 		obj = binder_find_obj_by_ref(proc, ref);
 
 	if (!obj)
-		return -1;
+		return -EINVAL;
 
 	if (bcmd == BC_ACQUIRE)
 		r = binder_acquire_obj(proc, thread, obj);
 	else
 		r = binder_release_obj(proc, thread, obj);
 
-	if (r < 0)
-		return -1;
-	return 0;
+	return (r < 0) ? r : 0;
 }
 
 static int bcmd_write_notifier(struct binder_proc *proc, struct binder_thread *thread, struct bcmd_notifier_data *notifier, uint32_t bcmd)
 {
 	struct binder_obj *obj;
 	struct bcmd_msg *msg;
-	uint32_t err;
+	int r;
 
 	obj = binder_find_obj_by_ref(proc, notifier->handle);
-	if (!obj) {
-		err = BR_FAILED_REPLY;
-		goto failed_obj;
-	}
+	if (!obj)
+		return -EINVAL;
 
 	msg = binder_alloc_msg(0, 0);
-	if (!msg) {
-		err = BR_FAILED_REPLY;
-		goto failed_msg;
-	}
+	if (!msg)
+		return -ENOMEM;
 
 	msg->type = bcmd;
 	msg->binder = obj->binder;
@@ -1320,29 +1378,20 @@ static int bcmd_write_notifier(struct binder_proc *proc, struct binder_thread *t
 	// dead_binder sent to the process queue, while clear_notifcation_done sent to the request thread
 	msg->reply_to = (bcmd == BC_REQUEST_DEATH_NOTIFICATION) ? msg_queue_id(proc->queue) : msg_queue_id(thread->queue);
 
-	if (bcmd_write_msg(obj->owner, msg) < 0) {
-		err = BR_FAILED_REPLY;
-		goto failed_write;
+	if ((r = bcmd_write_msg(obj->owner, msg)) < 0) {
+		kfree(msg);
+		return r;
 	}
 
 	return 0;
-
-failed_write:
-	kfree(msg);
-failed_msg:
-failed_obj:
-	thread->last_error = err;
-	return -1;
 }
 
 static int bcmd_write_looper(struct binder_proc *proc, struct binder_thread *thread, uint32_t bcmd)
 {
-	uint32_t err = 0;
-
 	switch (bcmd) {
 		case BC_ENTER_LOOPER:
 			if (thread->state & BINDER_LOOPER_STATE_READY)
-				err = BR_FAILED_REPLY;
+				return -EINVAL;
 			else
 				thread->state |= BINDER_LOOPER_STATE_ENTERED;
 			break;
@@ -1351,12 +1400,12 @@ static int bcmd_write_looper(struct binder_proc *proc, struct binder_thread *thr
 			if (thread->state & BINDER_LOOPER_STATE_ENTERED)
 				thread->state &= ~BINDER_LOOPER_STATE_READY;
 			else
-				err = BR_FAILED_REPLY;
+				return -EINVAL;
 			break;
 
 		case BC_REGISTER_LOOPER:
 			if (thread->state & BINDER_LOOPER_STATE_READY)
-				err = BR_FAILED_REPLY;
+				return -EINVAL;
 			else {
 				atomic_inc(&proc->registered_loopers);
 				atomic_dec(&proc->requested_loopers);
@@ -1364,24 +1413,19 @@ static int bcmd_write_looper(struct binder_proc *proc, struct binder_thread *thr
 			break;
 
 		default:
-			err = BR_FAILED_REPLY;
-			break;
+			return -EINVAL;
 	}
 
-	if (err) {
-		thread->last_error = err;
-		return -1;
-	}
 	return 0;
 }
 
-static long binder_thread_write(struct binder_proc *proc, struct binder_thread *thread, void __user *buf, unsigned long size)
+static long binder_thread_write(struct binder_proc *proc, struct binder_thread *thread, char __user *buf, char __user *end)
 {
-	void __user *p = buf, *ep = buf + size;
+	char __user *p = buf;
 	uint32_t bcmd;
-	int err = 0;
+	int r;
 
-	while ((p + sizeof(bcmd)) <= ep) {
+	while ((p + sizeof(bcmd)) <= end) {
 		if (get_user(bcmd, (uint32_t *)p))
 			return -EFAULT;
 		p += sizeof(bcmd);
@@ -1391,7 +1435,7 @@ static long binder_thread_write(struct binder_proc *proc, struct binder_thread *
 			case BC_REPLY:  {
 				struct bcmd_transaction_data tdata;
 
-				if ((p + sizeof(tdata)) > ep || copy_from_user(&tdata, p, sizeof(tdata)))
+				if ((p + sizeof(tdata)) > end || copy_from_user(&tdata, p, sizeof(tdata)))
 					return -EFAULT;
 				p += sizeof(tdata);
 
@@ -1402,18 +1446,32 @@ static long binder_thread_write(struct binder_proc *proc, struct binder_thread *
 						return -EINVAL;
 				}
 
-				err += bcmd_write_transaction(proc, thread, &tdata, bcmd);
+				r = bcmd_write_transaction(proc, thread, &tdata, bcmd);
+				if (r < 0) {
+					printk("binder: pid %d (tid %d) wrote transaction/reply failed: %d\n",
+						proc->pid, thread->pid, r);
+					return r;
+				}
 				break;
 			}
 
 			case BC_FREE_BUFFER: {
 				void *buffer;
 
-				if (get_user(buffer, (void __user **)p))
+				if ((p + sizeof(void *)) > end || get_user(buffer, (void __user **)p))
 					return -EFAULT;
 				p += sizeof(void *);
 
-				err += bcmd_write_free_buffer(proc, thread, buffer);
+				/* compat: there're transactions containing no data, e.g. PING_TRANSACTION, but the
+				   framework still sends us FREE_BUFFER command for them (with a NULL buffer). */
+				if (buffer) {
+					r = bcmd_write_free_buffer(proc, thread, buffer);
+					if (r < 0) {
+						printk("binder: pid %d (tid %d) wrote free_buffer failed: %d\n",
+							proc->pid, thread->pid, r);
+						return r;
+					}
+				}
 				break;
 			}
 
@@ -1423,11 +1481,16 @@ static long binder_thread_write(struct binder_proc *proc, struct binder_thread *
 			case BC_DECREFS: {
 				void *handle;
 
-				if (get_user(handle, (void __user **)p))
+				if ((p + sizeof(void *)) > end || get_user(handle, (void __user **)p))
 					return -EFAULT;
 				p += sizeof(void *);
 
-				err += bcmd_write_acquire(proc, thread, (unsigned long)handle, bcmd);
+				r = bcmd_write_acquire(proc, thread, (unsigned long)handle, bcmd);
+				if (r < 0) {
+					printk("binder: pid %d (tid %d) wrote acquire/release failed: %d\n",
+						proc->pid, thread->pid, r);
+					//return r;	// compat: don't return error if target no longer exists
+				}
 				break;
 			}
 
@@ -1435,28 +1498,44 @@ static long binder_thread_write(struct binder_proc *proc, struct binder_thread *
 			case BC_CLEAR_DEATH_NOTIFICATION: {
 				struct bcmd_notifier_data notifier;
 
-				if ((p + sizeof(notifier)) > ep || copy_from_user(&notifier, p, sizeof(notifier)))
+				if ((p + sizeof(notifier)) > end || copy_from_user(&notifier, p, sizeof(notifier)))
 					return -EFAULT;
 				p += sizeof(notifier);
 
-				err += bcmd_write_notifier(proc, thread, &notifier, bcmd);
+				r = bcmd_write_notifier(proc, thread, &notifier, bcmd);
+				if (r < 0) {
+					printk("binder: pid %d (tid %d) wrote notifier failed: %d\n",
+						proc->pid, thread->pid, r);
+					//return r;	// compat: don't return error if target no longer exists
+				}
 				break;
 			}
 
 			case BC_ENTER_LOOPER:
 			case BC_EXIT_LOOPER:
 			case BC_REGISTER_LOOPER:
-				err += bcmd_write_looper(proc, thread, bcmd);
+				r = bcmd_write_looper(proc, thread, bcmd);
+				if (r < 0) {
+					printk("binder: pid %d (tid %d) wrote looper failed: %d\n",
+						proc->pid, thread->pid, r);
+					return r;
+				}
 				break;
 
 			case BC_DEAD_BINDER_DONE:
-				// TODO: do something?
+				if ((p + sizeof(void *)) > end)
+					return -EFAULT;
+
+				// compat: not used
 				p += sizeof(void *);
 				break;
 
 			case BC_INCREFS_DONE:
 			case BC_ACQUIRE_DONE:
-				// TODO: do something?
+				if ((p + 2 * sizeof(void *)) > end)
+					return -EFAULT;
+
+				// compat: not used
 				p += 2 * sizeof(void *);
 				break;
 
@@ -1650,17 +1729,23 @@ static long bcmd_read_transaction_complete(struct binder_proc *proc, struct bind
 
 static long bcmd_read_dead_binder(struct binder_proc *proc, struct binder_thread *thread, struct bcmd_msg **pmsg, void __user *buf, unsigned long size)
 {
-	uint32_t cmd = (*pmsg)->type, cookie = (uint32_t)(*pmsg)->cookie;
+	struct bcmd_msg *msg = *pmsg;
+	uint32_t cmd = msg->type, cookie = (uint32_t)msg->cookie;
+	struct binder_obj *obj;
 
 	if (size < sizeof(cmd) * 2)
 		return -ENOSPC;
 
-	if (put_user(cmd, (uint32_t *)buf) || 
-	    put_user(cookie, (uint32_t *)((char *)buf + sizeof(cmd))))
-		return -EFAULT;
+	obj = binder_find_obj(proc, msg->reply_to, msg->binder);
+	if (obj) {
+		binder_free_obj(proc, obj, 1);
 
-printk("pid %d/%d (tid %d/%d) read DEAD_BINDER command with cookie %08x\n", proc->pid, task_tgid_vnr(current), thread->pid, task_pid_vnr(current), cookie);
-	kfree(*pmsg);
+		if (put_user(cmd, (uint32_t *)buf) || 
+		    put_user(cookie, (uint32_t *)((char *)buf + sizeof(cmd))))
+			return -EFAULT;
+	}
+
+	kfree(msg);
 	*pmsg = NULL;
 	return sizeof(cmd) * 2;
 }
@@ -1672,15 +1757,12 @@ static long bcmd_read_dead_reply(struct binder_proc *proc, struct binder_thread 
 	if (size < sizeof(cmd))
 		return -ENOSPC;
 
-	if (thread->pending_replies > 0) {
+	if (cmd == BR_DEAD_REPLY && thread->pending_replies > 0)
 		thread->pending_replies--;
-		//TODO: wakeup
-	}
 
 	if (put_user(cmd, (uint32_t *)buf))
 		return -EFAULT;
 
-printk("pid %d (tid %d) read DEAD_REPLY command\n", proc->pid, thread->pid);
 	kfree(*pmsg);
 	*pmsg = NULL;
 	return sizeof(cmd);
@@ -1715,13 +1797,12 @@ static long bcmd_read_acquire(struct binder_proc *proc, struct binder_thread *th
 		} else {
 			if (atomic_dec_return(&obj->refs) == 0) {
 				cmd = BR_RELEASE;
-				binder_free_obj(proc, obj);
+				binder_free_obj(proc, obj, 0);
 			}
 		}
 	}
 
 	if (cmd) {
-printk("pid %d (tid %d) read %s binder command on object %p/%p\n", proc->pid, thread->pid, cmd==BR_ACQUIRE?"ACQUIRE":"RELEASE", msg->binder, msg->cookie);
 		ref_cmd.cmd = cmd;
 		ref_cmd.binder = msg->binder;
 		ref_cmd.cookie = msg->cookie;
@@ -1738,7 +1819,7 @@ obj_removed:
 	return r;
 }
 
-static int bcmd_spawn_on_busy(struct binder_proc *proc, void __user *buf, unsigned long size)
+static int bcmd_spawn_on_busy(struct binder_proc *proc, struct binder_thread *thread, void __user *buf, unsigned long size)
 {
 	uint32_t cmd = BR_SPAWN_LOOPER;
 	int n;
@@ -1761,28 +1842,17 @@ static int bcmd_spawn_on_busy(struct binder_proc *proc, void __user *buf, unsign
 	return 0;
 }
 
-static long binder_thread_read(struct binder_proc *proc, struct binder_thread *thread, void __user *buf, unsigned long size)
+static long binder_thread_read(struct binder_proc *proc, struct binder_thread *thread, char __user *buf, char __user *end)
 {
 	struct msg_queue *q;
 	struct bcmd_msg *msg = NULL;
-	void __user *p = buf;
+	char __user *p = buf;
+	ssize_t size = end - buf;
 	int proc_looper = 0, force_return = 0;
 	long n;
 
-#if 0
-	if (thread->last_error) {
-		if (size >= sizeof(uint32_t)) {
-			if (put_user(thread->last_error, (uint32_t *)p))
-				return -EFAULT;
-			thread->last_error = 0;
-			p += sizeof(uint32_t);
-		}
-		return p - buf;	// error returned immediately
-	}
-#endif
-
 	if (thread->state & BINDER_LOOPER_STATE_READY) {	// compat: only ready threads can request spawn
-		n = bcmd_spawn_on_busy(proc, p, size);
+		n = bcmd_spawn_on_busy(proc, thread, p, size);
 		if (n)	// spawn or error returned immediately
 			return n;
 	}
@@ -1801,11 +1871,8 @@ static long binder_thread_read(struct binder_proc *proc, struct binder_thread *t
 			break;
 
 		n = _bcmd_read_msg(q, &msg);
-		if (n < 0) {
-			if (n == -ERESTARTSYS)	// compat
-				n = -EINTR;
+		if (n < 0)
 			goto clean_up;
-		}
 
 		if (proc_looper) {
 			atomic_dec(&proc->proc_loopers);
@@ -1847,6 +1914,7 @@ static long binder_thread_read(struct binder_proc *proc, struct binder_thread *t
 				break;
 
 			case BR_DEAD_REPLY:
+			case BR_FAILED_REPLY:
 				n = bcmd_read_dead_reply(proc, thread, &msg, p, size);
 				force_return = 1;
 				break;
@@ -1894,21 +1962,21 @@ static inline int cmd_write_read(struct binder_proc *proc, struct binder_thread 
 {
 	int r;
 
-	if (bwr->write_size > 0) {
-		r = binder_thread_write(proc, thread, (void __user *)bwr->write_buffer + bwr->write_consumed, bwr->write_size);
-		if (r < 0) {
-printk("proc %d (tid %d) BWR write %d\n", proc->pid, thread->pid, r);
+	if (bwr->write_size > 0 && bwr->write_consumed < bwr->write_size) {
+		r = binder_thread_write(proc, thread, 
+					(char __user *)bwr->write_buffer + bwr->write_consumed,
+					(char __user *)bwr->write_buffer + bwr->write_size);
+		if (r < 0)
 			return r;
-		}
 		bwr->write_consumed += r;
 	}
 
-	if (bwr->read_size > 0) {
-		r = binder_thread_read(proc, thread, (void __user *)bwr->read_buffer + bwr->read_consumed, bwr->read_size);
-		if (r < 0) {
-printk("proc %d (tid %d) BWR read %d\n", proc->pid, thread->pid, r);
+	if (bwr->read_size > 0 && bwr->read_consumed < bwr->read_size) {
+		r = binder_thread_read(proc, thread,
+					(char __user *)bwr->read_buffer + bwr->read_consumed, 
+					(char __user *)bwr->read_buffer + bwr->read_size);
+		if (r < 0)
 			return r;
-		}
 		bwr->read_consumed += r;
 	}
 
@@ -1972,7 +2040,6 @@ static int binder_release(struct inode *nodp, struct file *filp)
 		context_mgr_obj = NULL;
 
 	// TODO: make sure existing referencing context_mgr_obj is safe
-	// TODO: assume no more threads running
 
 	binder_free_proc(proc);
 	return 0;
@@ -1999,13 +2066,20 @@ static long binder_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			if (copy_from_user(&bwr, ubuf, sizeof(bwr)))
 				return -EFAULT;
 
-			r = cmd_write_read(proc, thread, &bwr);
-			if (r < 0)
-				return r;
+			atomic_inc(&proc->busy_threads);
 
+			r = cmd_write_read(proc, thread, &bwr);
+
+			/* no one is referencing any objects, so it's safe to do reclaiming now */ 
+			if (!atomic_dec_return(&proc->busy_threads) && !list_empty(&proc->reclaim_list))
+				binder_reclaim_objs(proc);
+
+			/* copy bwr back regardlessly in case we've done write but got interrupted
+			   in read */
 			if (copy_to_user(ubuf, &bwr, sizeof(bwr)))
 				return -EFAULT;
-			return 0;
+
+			return (r < 0) ? r : 0;
 		}
 
 		case BINDER_THREAD_EXIT:
@@ -2051,9 +2125,7 @@ static unsigned int binder_poll(struct file *filp, poll_table *p)
 	msg_queue_poll_wait_read(proc->queue, filp, p);
 	msg_queue_poll_wait_read(thread->queue, filp, p);
 
-	if (thread->last_error ||
-	    !msg_queue_empty(thread->queue) ||
-	    (thread->pending_replies < 1 && msg_queue_size(proc->queue) > 0))
+	if (!msg_queue_empty(thread->queue) || msg_queue_size(proc->queue) > 0)
 		return POLLIN | POLLRDNORM;
 
 	// TODO: consider POLLOUT case as write can block too (not compat)
@@ -2100,11 +2172,11 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 	if (proc->ustart || proc->slob)	// TODO: free existing slob?
 		return -EBUSY;
 
-	/* compat: sericemanager has a map size of 128K and the rest uses (1024-2)k */
+	/* compat: sericemanager has a map size of 128K and the rest uses (1024-8)k */
 	if (size < 512 * 1024)
 		proc->slob = fast_slob_create(size, 16 * 1024, 4, 2);
 	else
-		proc->slob = fast_slob_create(size, 64 * 1024, 3, 4);
+		proc->slob = fast_slob_create(size, 128 * 1024, 3, 4);
 	if (!proc->slob)
 		return -ENOMEM;
 
@@ -2125,117 +2197,43 @@ static int binder_mmap(struct file *filp, struct vm_area_struct *vma)
 
 static int debugfs_proc_info(struct seq_file *seq, void *start)
 {	
-	struct debugfs_priv *priv = seq->private;
-	struct binder_proc *proc;
-	struct msg_queue *q;
-
-	if (!(q = get_msg_queue(priv->owner)))
-		return -ENODEV;
-
-	proc = priv->proc;
+	struct binder_proc *proc = seq->private;
 
 	seq_printf(seq, "pid: %d\n", proc->pid);
-	seq_printf(seq, "qid: %ld\n", msg_queue_id(proc->queue));
+	seq_printf(seq, "queue: %p\n", proc->queue);
 	seq_printf(seq, "obj_seq: %lu\n", proc->obj_seq);
 	seq_printf(seq, "max_threads: %d\n", proc->max_threads);
 	seq_printf(seq, "registered_loopers: %d\n", atomic_read(&proc->registered_loopers));
 	seq_printf(seq, "proc_loopers: %d\n", atomic_read(&proc->proc_loopers));
 	seq_printf(seq, "requested_loopers: %d\n", atomic_read(&proc->requested_loopers));
 
-	put_msg_queue(q);
 	return 0;
 }
 
 static int debugfs_thread_info(struct seq_file *seq, void *start)
 {
-	struct debugfs_priv *priv = seq->private;
-	struct binder_proc *proc;
-	pid_t pid;
-	struct rb_node **p;
-	struct rb_node *parent = NULL;
-	struct binder_thread *thread;
-	struct msg_queue *q;
+	struct binder_thread *thread = seq->private;
 
-	if (!(q = get_msg_queue(priv->owner)))
-		return -ENODEV;
-
-	proc = priv->proc;
-	pid = priv->data;
-	p = &proc->thread_tree.rb_node;
-
-	spin_lock(&proc->lock);
-	while (*p) {
-		parent = *p;
-		thread = rb_entry(parent, struct binder_thread, rb_node);
-
-		if (pid < thread->pid)
-			p = &(*p)->rb_left;
-		else if (pid > thread->pid)
-			p = &(*p)->rb_right;
-		else
-			goto seq_show;
-	}
-	spin_unlock(&proc->lock);
-
-	put_msg_queue(q);
-	return -ENODEV;
-	
-seq_show:
 	seq_printf(seq, "pid: %d\n", thread->pid);
-	seq_printf(seq, "qid: %ld\n", msg_queue_id(thread->queue));
+	seq_printf(seq, "queue: %p\n", thread->queue);
 	seq_printf(seq, "state: %d\n", thread->state);
 	seq_printf(seq, "non_block: %d\n", thread->non_block);
-	seq_printf(seq, "last_error: %x\n", thread->last_error);
 	seq_printf(seq, "pending_replies: %d\n", thread->pending_replies);
-	//TODO: show incoming_transactions
 
-	spin_unlock(&proc->lock);
-
-	put_msg_queue(q);
 	return 0;
 }
 
 static int debugfs_obj_info(struct seq_file *seq, void *start)
 {
-	struct debugfs_priv *priv = seq->private;
-	struct binder_proc *proc;
-	unsigned long ref;
-	struct binder_obj *obj;
-	struct hlist_head *head;
-	struct hlist_node *node;
-	struct msg_queue *q;
+	struct binder_obj *obj = seq->private;
 
-	if (!(q = get_msg_queue(priv->owner)))
-		return -ENODEV;
-
-	proc = priv->proc;
-	ref = priv->data;
-
-	spin_lock(&proc->obj_lock);
-
-	head = &proc->obj_hash[ref % OBJ_HASH_BUCKET_SIZE];
-	hlist_for_each_entry(obj, node, head, hash_node) {
-		if (obj->ref == ref)
-			goto seq_show;
-	}
-
-	spin_unlock(&proc->obj_lock);
-
-	put_msg_queue(q);
-	return -ENODEV;
-
-seq_show:
 	seq_printf(seq, "ref: %lu\n", obj->ref);
 	seq_printf(seq, "type: %s\n", OBJ_IS_BINDER(obj) ? "binder" : "handle");
 	seq_printf(seq, "owner: %ld\n", obj->owner);
 	seq_printf(seq, "binder: %p\n", obj->binder);
 	seq_printf(seq, "cookie: %p\n", obj->cookie);
 	seq_printf(seq, "refs: %d\n", atomic_read(&obj->refs));
-	// TODO: show notifiers
 
-	spin_unlock(&proc->obj_lock);
-
-	put_msg_queue(q);
 	return 0;
 }
 
@@ -2278,43 +2276,31 @@ static const struct file_operations debugfs_obj_fops = {
 	.release	= single_release
 };
 
-static struct debugfs_priv *debugfs_new_proc(struct binder_proc *proc)
+static inline int debugfs_new_proc(struct binder_proc *proc)
 {
-	struct debugfs_priv *priv;
 	struct dentry *d;
 	char str[32];
 
-	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		goto no_mem;
-	priv->owner = msg_queue_id(proc->queue);
-	priv->proc = proc;
-
 	sprintf(str, "%d", proc->pid);
-	d = debugfs_create_file(str, S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
+	proc->proc_dir = debugfs_create_file(str, S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
 				debugfs_root, proc, NULL);
-	if (!d)
+	if (!proc->proc_dir)
 		goto no_proc;
-	proc->proc_dir = d;
 
-	d = debugfs_create_file("threads", S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
+	proc->thread_dir = debugfs_create_file("threads", S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
 				proc->proc_dir, proc, NULL);
-	if (!d)
+	if (!proc->thread_dir)
 		goto no_threads;
-	proc->thread_dir = d;
 
-	d = debugfs_create_file("objs", S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
+	proc->obj_dir = debugfs_create_file("objs", S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO,
 				proc->proc_dir, proc, NULL);
-
-	if (!d)
+	if (!proc->obj_dir)
 		goto no_objs;
-	proc->obj_dir = d;
 
-	d = debugfs_create_file("info", S_IRUGO, proc->proc_dir, priv, &debugfs_proc_fops);
+	d = debugfs_create_file("info", S_IRUGO, proc->proc_dir, proc, &debugfs_proc_fops);
 	if (!d)
 		goto no_info;
-
-	return priv;
+	return 0;
 
 no_info:
 	debugfs_remove(proc->obj_dir);
@@ -2323,55 +2309,34 @@ no_objs:
 no_threads:
 	debugfs_remove(proc->proc_dir);
 no_proc:
-	kfree(priv);
-no_mem:
-	return NULL;
+	proc->proc_dir = proc->thread_dir = proc->obj_dir = NULL;
+	return -ENOMEM;
 }
 
-static struct debugfs_priv *debugfs_new_thread(struct binder_proc *proc, struct binder_thread *thread)
+static inline int debugfs_new_thread(struct binder_proc *proc, struct binder_thread *thread)
 {
-	struct debugfs_priv *priv;
-	char str[32];
+	if (proc->thread_dir) {
+		char str[32];
 
-	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return NULL;
+		sprintf(str, "%d", thread->pid);
+		thread->info_node = debugfs_create_file(str, S_IRUGO, proc->thread_dir, thread, &debugfs_thread_fops);
 
-	priv->owner = msg_queue_id(proc->queue);
-	priv->proc = proc;
-	priv->data = (unsigned long)thread->pid;
-
-	sprintf(str, "%d", thread->pid);
-	thread->info_node = debugfs_create_file(str, S_IRUGO, proc->thread_dir, priv, &debugfs_thread_fops);
-	if (!thread->info_node) {
-		kfree(priv);
-		return NULL;
-	}
-
-	return priv;
+		return thread->info_node ? 0 : -ENOMEM;
+	} else
+		return -ENOMEM;
 }
 
-static struct debugfs_priv *debugfs_new_obj(struct binder_proc *proc, struct binder_obj *obj)
+static inline int debugfs_new_obj(struct binder_proc *proc, struct binder_obj *obj)
 {
-	struct debugfs_priv *priv;
-	char str[32];
+	if (proc->obj_dir) {
+		char str[32];
 
-	priv = kmalloc(sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return NULL;
+		sprintf(str, "%lu", obj->ref);
+		obj->info_node = debugfs_create_file(str, S_IRUGO, proc->obj_dir, obj, &debugfs_obj_fops);
 
-	priv->owner = msg_queue_id(proc->queue);
-	priv->proc = proc;
-	priv->data = obj->ref;
-
-	sprintf(str, "%lu", obj->ref);
-	obj->info_node = debugfs_create_file(str, S_IRUGO, proc->obj_dir, priv, &debugfs_obj_fops);
-	if (!obj->info_node) {
-		kfree(priv);
-		return NULL;
-	}
-
-	return priv;
+		return obj->info_node ? 0 : -ENOMEM;
+	} else
+		return -ENOMEM;
 }
 
 static int __init binder_debugfs_init(void)
