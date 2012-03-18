@@ -28,6 +28,9 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/regulator/consumer.h>
+#include <linux/atomic.h>
+#include <linux/switch.h>
+#include <linux/platform_data/fsa9480.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -181,6 +184,9 @@ struct s3c_hsotg {
 	unsigned int		setup;
 	unsigned long           last_rst;
 	struct s3c_hsotg_ep	*eps;
+
+	int			vbus_state;
+	int			vbus_enabled;
 };
 
 /**
@@ -2815,6 +2821,61 @@ static void s3c_hsotg_init(struct s3c_hsotg *hsotg)
 	       hsotg->regs + S3C_GAHBCFG);
 }
 
+static int s3c_hsotg_vbus_start(void)
+{
+	struct s3c_hsotg *hsotg = our_hsotg;
+	int ret;
+
+	if (!hsotg)
+		return -ENODEV;
+
+	if (hsotg->vbus_enabled)
+		return 0;
+	hsotg->vbus_enabled = 1;
+
+	dev_info(hsotg->dev, "enabling vbus");
+
+	ret = regulator_bulk_enable(ARRAY_SIZE(hsotg->supplies),
+				    hsotg->supplies);
+	if (ret) {
+		dev_err(hsotg->dev, "failed to enable supplies: %d\n", ret);
+		return ret;
+	}
+
+	s3c_hsotg_phy_enable(hsotg);
+
+	s3c_hsotg_core_init(hsotg);
+	hsotg->last_rst = jiffies;
+
+	return 0;
+}
+
+static int s3c_hsotg_vbus_stop(void)
+{
+	struct s3c_hsotg *hsotg = our_hsotg;
+	int ep;
+
+	if (!hsotg)
+		return -ENODEV;
+
+	dev_info(hsotg->dev, "disabling vbus");
+
+	if (!hsotg->vbus_enabled)
+		return 0;
+	hsotg->vbus_enabled = 0;
+
+	/* all endpoints should be shutdown */
+	for (ep = 0; ep < hsotg->num_of_eps; ep++)
+		s3c_hsotg_ep_disable(&hsotg->eps[ep].ep);
+
+	call_gadget(hsotg, disconnect);
+
+	s3c_hsotg_phy_disable(hsotg);
+	regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
+
+	return 0;
+}
+
 static int s3c_hsotg_udc_start(struct usb_gadget *gadget,
 			   struct usb_gadget_driver *driver)
 {
@@ -2847,17 +2908,13 @@ static int s3c_hsotg_udc_start(struct usb_gadget *gadget,
 	hsotg->gadget.dev.dma_mask = hsotg->dev->dma_mask;
 	hsotg->gadget.speed = USB_SPEED_UNKNOWN;
 
-	ret = regulator_bulk_enable(ARRAY_SIZE(hsotg->supplies),
-				    hsotg->supplies);
-	if (ret) {
-		dev_err(hsotg->dev, "failed to enable supplies: %d\n", ret);
+	ret = s3c_hsotg_vbus_start();
+	if (ret)
 		goto err;
-	}
 
-	s3c_hsotg_phy_enable(hsotg);
-
-	s3c_hsotg_core_init(hsotg);
-	hsotg->last_rst = jiffies;
+	if (!hsotg->vbus_state)
+		s3c_hsotg_vbus_stop();
+	
 	dev_info(hsotg->dev, "bound driver %s\n", driver->driver.name);
 	return 0;
 
@@ -2871,7 +2928,6 @@ static int s3c_hsotg_udc_stop(struct usb_gadget *gadget,
 			  struct usb_gadget_driver *driver)
 {
 	struct s3c_hsotg *hsotg = our_hsotg;
-	int ep;
 
 	if (!hsotg)
 		return -ENODEV;
@@ -2879,15 +2935,10 @@ static int s3c_hsotg_udc_stop(struct usb_gadget *gadget,
 	if (!driver || driver != hsotg->driver || !driver->unbind)
 		return -EINVAL;
 
-	/* all endpoints should be shutdown */
-	for (ep = 0; ep < hsotg->num_of_eps; ep++)
-		s3c_hsotg_ep_disable(&hsotg->eps[ep].ep);
-
-	call_gadget(hsotg, disconnect);
-
 	driver->unbind(&hsotg->gadget);
-	s3c_hsotg_phy_disable(hsotg);
-	regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
+
+	if (hsotg->vbus_state)
+		s3c_hsotg_vbus_stop();
 
 	hsotg->driver = NULL;
 	hsotg->gadget.speed = USB_SPEED_UNKNOWN;
@@ -2905,10 +2956,47 @@ static int s3c_hsotg_gadget_getframe(struct usb_gadget *gadget)
 	return s3c_hsotg_read_frameno(to_hsotg(gadget));
 }
 
+static int s3c_hsotg_pullup(struct usb_gadget *gadget, int state)
+{
+	struct s3c_hsotg *hsotg = our_hsotg;
+
+	if (!hsotg)
+		return -ENODEV;
+
+	if (state) {
+		__bic32(hsotg->regs + S3C_DCTL, S3C_DCTL_SftDiscon);
+	} else {
+		__orr32(hsotg->regs + S3C_DCTL, S3C_DCTL_SftDiscon);
+		s3c_hsotg_disconnect(hsotg);
+	}
+
+	return 0;
+}
+
+static int s3c_hsotg_vbus_session(struct usb_gadget *gadget, int state)
+{
+	struct s3c_hsotg *hsotg = our_hsotg;
+
+	if (!hsotg)
+		return -ENODEV;
+
+	if (hsotg->vbus_state != state) {
+		hsotg->vbus_state = state;
+		if (state)
+			return s3c_hsotg_vbus_start();
+		else
+			return s3c_hsotg_vbus_stop();
+	}
+
+	return 0;
+}
+
 static struct usb_gadget_ops s3c_hsotg_gadget_ops = {
 	.get_frame	= s3c_hsotg_gadget_getframe,
-	.udc_start		= s3c_hsotg_udc_start,
-	.udc_stop		= s3c_hsotg_udc_stop,
+	.udc_start	= s3c_hsotg_udc_start,
+	.udc_stop	= s3c_hsotg_udc_stop,
+	.pullup		= s3c_hsotg_pullup,
+	.vbus_session	= s3c_hsotg_vbus_session,
 };
 
 /**
@@ -3321,6 +3409,21 @@ static void __devexit s3c_hsotg_delete_debug(struct s3c_hsotg *hsotg)
 	debugfs_remove(hsotg->debug_root);
 }
 
+static void switch_handler_cb(struct switch_handler *handler, unsigned state)
+{
+	struct s3c_hsotg *hsotg = our_hsotg;
+
+	if (state)
+		usb_gadget_vbus_connect(&hsotg->gadget);
+	else
+		usb_gadget_vbus_disconnect(&hsotg->gadget);
+}
+
+static DEFINE_SWITCH_HANDLER(switch_handler_usb, "fsa9480", FSA9480_SWITCH_USB,
+			     switch_handler_cb, NULL);
+static DEFINE_SWITCH_HANDLER(switch_handler_deskdock, "fsa9480", FSA9480_SWITCH_DESKDOCK,
+			     switch_handler_cb, NULL);
+
 static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 {
 	struct s3c_hsotg_plat *plat = pdev->dev.platform_data;
@@ -3346,6 +3449,7 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 
 	hsotg->dev = dev;
 	hsotg->plat = plat;
+	hsotg->vbus_enabled = 0;
 
 	hsotg->clk = clk_get(&pdev->dev, "otg");
 	if (IS_ERR(hsotg->clk)) {
@@ -3492,6 +3596,10 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 	s3c_hsotg_dump(hsotg);
 
 	our_hsotg = hsotg;
+	
+	switch_handler_register(&switch_handler_usb);
+	switch_handler_register(&switch_handler_deskdock);
+	
 	return 0;
 
  err_ep_mem:
