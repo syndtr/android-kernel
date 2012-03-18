@@ -161,13 +161,17 @@ static void __init qss_machine_init(void)
 	qss_fiqdbg_init();
 #endif
 
+	/* devices */
+	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
+
 	/* MFD */
 	qss_mfd_init();
 
 	/* Power */
 	qss_power_init();
 
-	platform_add_devices(qss_devices, ARRAY_SIZE(qss_devices));
+	/* Display */
+	qss_display_init();
 
 	/* Input */
 	qss_input_init();
@@ -175,27 +179,24 @@ static void __init qss_machine_init(void)
 	/* Switch */
 	qss_switch_init();
 
-	/* SDHCI */
-	qss_sdhci_init();
-	
 	/* OneNAND */
 	qss_onenand_init();
 
-	/* Display */
-	qss_display_init();
-
-	/* Media */
-	qss_media_init();
+	/* SDHCI */
+	qss_sdhci_init();
 
 	/* Wifi */
 	qss_wifi_init();
+
+	/* Media */
+	qss_media_init();
 
 	/* Sound */
 	qss_sound_init();
 
 	/* Phone */
 	qss_phone_init();
-	
+
 	/* USB */
 	clk_xusbxti.rate = 24000000;
 	s3c_hsotg_set_platdata(&qss_hsotg_pdata);
