@@ -47,6 +47,7 @@ void s3c_sdhci_set_platdata(struct s3c_sdhci_platdata *pd,
 	set->ext_cd_gpio = pd->ext_cd_gpio;
 	set->ext_cd_gpio_invert = pd->ext_cd_gpio_invert;
 	set->host_caps |= pd->host_caps;
+	set->host_caps2 |= pd->host_caps2;
 	set->host_quirks |= pd->host_quirks;
 	set->pm_caps |= pd->pm_caps;
 	set->pm_flags |= pd->pm_flags;
@@ -57,6 +58,4 @@ void s3c_sdhci_set_platdata(struct s3c_sdhci_platdata *pd,
 		set->cfg_gpio = pd->cfg_gpio;
 	if (pd->cfg_clock)
 		set->cfg_clock = pd->cfg_clock;
-	if (pd->clk_type)
-		set->clk_type = pd->clk_type;
 }
