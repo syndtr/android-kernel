@@ -26,7 +26,7 @@
 /* Consumers */
 
 static struct regulator_consumer_supply ldo3_consumer[] = {
-	REGULATOR_SUPPLY("pd_io", "s3c-hsotg")
+	REGULATOR_SUPPLY("vusb_a", "s3c-hsotg")
 };
 
 static struct regulator_consumer_supply ldo4_consumer[] = {
@@ -43,7 +43,7 @@ static struct regulator_consumer_supply ldo7_consumer[] = {
 };
 
 static struct regulator_consumer_supply ldo8_consumer[] = {
-	REGULATOR_SUPPLY("pd_core", "s3c-hsotg")
+	REGULATOR_SUPPLY("vusb_d", "s3c-hsotg")
 };
 
 static struct regulator_consumer_supply ldo11_consumer[] = {

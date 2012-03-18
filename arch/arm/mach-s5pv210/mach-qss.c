@@ -29,10 +29,13 @@
 #include <plat/cpu.h>
 #include <plat/s5p-time.h>
 #include <plat/gpio-cfg.h>
+#include <plat/udc-hs.h>
 
 #include <mach/qss.h>
 
 #include "common.h"
+
+#include <plat/clock.h>
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define GONI_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -99,7 +102,6 @@ static struct platform_device *qss_devices[] __initdata = {
 	&s3c_device_adc,
 	&s3c_device_rtc,
 	&s3c_device_wdt,
-	&s3c_device_usb_hsotg,
 };
 
 static void __init qss_fixup(struct tag *tag, char **cmdline,
@@ -140,6 +142,8 @@ int qss_hwrev(void)
 {
 	return __hwrev;
 }
+
+static struct s3c_hsotg_plat qss_hsotg_pdata;
 
 static void __init qss_machine_init(void)
 {
@@ -191,6 +195,11 @@ static void __init qss_machine_init(void)
 
 	/* Phone */
 	qss_phone_init();
+	
+	/* USB */
+	clk_xusbxti.rate = 24000000;
+	s3c_hsotg_set_platdata(&qss_hsotg_pdata);
+	platform_device_register(&s3c_device_usb_hsotg);
 }
 
 MACHINE_START(QSS, "QSS")
