@@ -37,21 +37,6 @@ config BRCMFMAC_SDIO
 	  Say Y if you want to use brcmfmac for a compatible SDIO interface
 	  wireless card.
 
-
-config BRCMFMAC_FW_NAME
-	depends on BRCMFMAC
-	string "Firmware path"
-	default "brcm/bcm4329-fullmac-4.bin"
-	---help---
-	  Path to the firmware file.
-
-config BRCMFMAC_NV_NAME
-	depends on BRCMFMAC
-	string "NVRAM path"
-	default "brcm/bcm4329-fullmac-4.txt"
-	---help---
-	  Path to the nvram file.
-
 config BRCMDBG
 	bool "Broadcom driver debug functions"
 	depends on BRCMSMAC || BRCMFMAC

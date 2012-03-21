@@ -3245,14 +3245,10 @@ static int brcmf_sdbrcm_download_code_file(struct brcmf_sdio *bus)
 
 	brcmf_dbg(INFO, "Enter\n");
 
-#ifdef CONFIG_BRCMFMAC_FW_NAME
-	bus->fw_name = CONFIG_BRCMFMAC_FW_NAME;
-#else
-	bus->fw_name = BCM4329_FW_NAME;
-	ret = request_firmware(&bus->firmware, bus->fw_name,
+	ret = request_firmware(&bus->firmware, BRCMFMAC_FW_NAME,
 			       &bus->sdiodev->func[2]->dev);
 	if (ret) {
-		brcmf_dbg(ERROR, "Fail to request firmware %s (%d)\n", bus->fw_name, ret);
+		brcmf_dbg(ERROR, "Fail to request firmware %d\n", ret);
 		return ret;
 	}
 	bus->fw_ptr = 0;
@@ -3345,18 +3341,11 @@ static int brcmf_sdbrcm_download_nvram(struct brcmf_sdio *bus)
 	char *memblock = NULL;
 	char *bufp;
 	int ret;
-	char *nv_name;
 
-#ifdef CONFIG_BRCMFMAC_NV_NAME
-	nv_name = CONFIG_BRCMFMAC_NV_NAME;
-#else
-	nv_name = BRCMFMAC_NV_NAME;
-#endif
-
-	ret = request_firmware(&bus->firmware, nv_name,
+	ret = request_firmware(&bus->firmware, BRCMFMAC_NV_NAME,
 			       &bus->sdiodev->func[2]->dev);
 	if (ret) {
-		brcmf_dbg(ERROR, "Fail to request nvram %s (%d)\n", nv_name, ret);
+		brcmf_dbg(ERROR, "Fail to request nvram %d\n", ret);
 		return ret;
 	}
 	bus->fw_ptr = 0;

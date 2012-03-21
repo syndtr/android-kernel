@@ -524,10 +524,10 @@ static void brcmf_ops_sdio_remove(struct sdio_func *func)
 	brcmf_dbg(INFO, "sdio_device: 0x%04x\n", func->device);
 	brcmf_dbg(INFO, "Function#: 0x%04x\n", func->num);
 
-	if (func->num == 1) {
+	if (func->num == 2) {
 		bus_if = dev_get_drvdata(&func->dev);
 		sdiodev = bus_if->bus_priv;
-		brcmf_dbg(TRACE, "F1 found, calling brcmf_sdio_remove...\n");
+		brcmf_dbg(TRACE, "F2 found, calling brcmf_sdio_remove...\n");
 		brcmf_sdio_remove(sdiodev);
 		dev_set_drvdata(&func->card->dev, NULL);
 		dev_set_drvdata(&func->dev, NULL);
