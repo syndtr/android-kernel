@@ -38,8 +38,9 @@ extern int android_pm_disable(struct device *dev);
 #define ANDROID_PM_OPS_PROTO(name)
 #define STATIC_ANDROID_PM_OPS_PROTO(name)
 
-static inline int android_pm_enable(struct device *dev, const struct android_pm_ops *ops) { return 0; }
-static inline int android_pm_disable(struct device *dev) { return 0; }
+static inline int ___android_pm_none(void) { return 0; }
+#define android_pm_enable(dev, ops) ___android_pm_none()
+#define android_pm_disable(dev) ___android_pm_none()
 
 #endif
 
