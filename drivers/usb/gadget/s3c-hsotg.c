@@ -28,7 +28,6 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/regulator/consumer.h>
-#include <linux/atomic.h>
 #include <linux/switch.h>
 #include <linux/platform_data/fsa9480.h>
 
@@ -185,8 +184,8 @@ struct s3c_hsotg {
 	unsigned long           last_rst;
 	struct s3c_hsotg_ep	*eps;
 
-	int			vbus_state;
-	int			vbus_enabled;
+	int			vbus_state:1;
+	int			vbus_enabled:1;
 };
 
 /**
@@ -3449,6 +3448,7 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 
 	hsotg->dev = dev;
 	hsotg->plat = plat;
+	hsotg->vbus_state = 0;
 	hsotg->vbus_enabled = 0;
 
 	hsotg->clk = clk_get(&pdev->dev, "otg");
