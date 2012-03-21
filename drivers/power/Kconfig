@@ -262,7 +262,7 @@ config CHARGER_MANAGER
 
 config CHARGER_MANAGER_ANDROID
 	bool "Battery charger manager for multiple chargers (Android)"
-	depends on REGULATOR && WAKELOCK && ANDROID_INTF_ALARM && !CHARGER_MANAGER
+	depends on REGULATOR && ANDROID_INTF_ALARM && !CHARGER_MANAGER
 	help
 	  Say Y to enable charger-manager support, which allows multiple
 	  chargers attached to a battery and multiple batteries attached to a
