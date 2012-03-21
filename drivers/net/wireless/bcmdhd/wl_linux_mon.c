@@ -1,14 +1,14 @@
 /*
  * Broadcom Dongle Host Driver (DHD), Linux monitor network interface
  *
- * Copyright (C) 1999-2011, Broadcom Corporation
- *
- *         Unless you and Broadcom execute a separate written software license
+ * Copyright (C) 1999-2012, Broadcom Corporation
+ * 
+ *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
  * under the terms of the GNU General Public License version 2 (the "GPL"),
  * available at http://www.broadcom.com/licenses/GPLv2.php, with the
  * following added to such license:
- *
+ * 
  *      As a special exception, the copyright holders of this software give you
  * permission to link this software with independent modules, and to copy and
  * distribute the resulting executable under terms of your choice, provided that
@@ -16,14 +16,15 @@
  * the license of that module.  An independent module is a module which is not
  * derived from this software.  The special exception does not apply to any
  * modifications of the software.
- *
+ * 
  *      Notwithstanding the above, under no circumstances may you combine this
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_linux_mon.c,v 1.131.2.55 2011-02-09 05:31:56 Exp $
+ * $Id: dhd_linux_mon.c 280623 2011-08-30 14:49:39Z $
  */
 
+#include <osl.h>
 #include <linux/string.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
@@ -35,7 +36,6 @@
 
 #include <wlioctl.h>
 #include <bcmutils.h>
-#include <linux_osl.h>
 #include <dhd_dbg.h>
 #include <dngl_stats.h>
 #include <dhd.h>
@@ -47,11 +47,18 @@ typedef enum monitor_states
 	MONITOR_STATE_INTERFACE_ADDED = 0x2,
 	MONITOR_STATE_INTERFACE_DELETED = 0x4
 } monitor_states_t;
+int dhd_add_monitor(char *name, struct net_device **new_ndev);
 extern int dhd_start_xmit(struct sk_buff *skb, struct net_device *net);
+int dhd_del_monitor(struct net_device *ndev);
+int dhd_monitor_init(void *dhd_pub);
+int dhd_monitor_uninit(void);
 
 /**
  * Local declarations and defintions (not exposed)
  */
+#ifndef DHD_MAX_IFS
+#define DHD_MAX_IFS 16
+#endif
 #define MON_PRINT(format, ...) printk("DHD-MON: %s " format, __func__, ##__VA_ARGS__)
 #define MON_TRACE MON_PRINT
 
@@ -82,8 +89,12 @@ static const struct net_device_ops dhd_mon_if_ops = {
 	.ndo_open		= dhd_mon_if_open,
 	.ndo_stop		= dhd_mon_if_stop,
 	.ndo_start_xmit		= dhd_mon_if_subif_start_xmit,
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 3, 0))
 	.ndo_set_rx_mode	= dhd_mon_if_set_multicast_list,
-	.ndo_set_mac_address 	= dhd_mon_if_change_mac,
+#else
+	.ndo_set_multicast_list = dhd_mon_if_set_multicast_list,
+#endif
+	.ndo_set_mac_address	= dhd_mon_if_change_mac,
 };
 
 /**
@@ -95,17 +106,32 @@ static const struct net_device_ops dhd_mon_if_ops = {
  */
 static struct net_device* lookup_real_netdev(char *name)
 {
-	int i;
-	int last_name_len = 0;
-	struct net_device *ndev;
 	struct net_device *ndev_found = NULL;
 
-	/* We want to find interface "p2p-eth0-0" for monitor interface "mon.p2p-eth0-0", so
-	 * we skip "eth0" even if "mon.p2p-eth0-0" contains "eth0"
+	int i;
+	int len = 0;
+	int last_name_len = 0;
+	struct net_device *ndev;
+
+	/* We need to find interface "p2p-p2p-0" corresponding to monitor interface "mon-p2p-0",
+	 * Once mon iface name reaches IFNAMSIZ, it is reset to p2p0-0 and corresponding mon
+	 * iface would be mon-p2p0-0.
 	 */
 	for (i = 0; i < DHD_MAX_IFS; i++) {
 		ndev = dhd_idx2net(g_monitor.dhd_pub, i);
-		if (ndev && strstr(name, ndev->name)) {
+
+		/* Skip "p2p" and look for "-p2p0-x" in monitor interface name. If it
+		 * it matches, then this netdev is the corresponding real_netdev.
+		 */
+		if (ndev && strstr(ndev->name, "p2p-p2p0")) {
+			len = strlen("p2p");
+		} else {
+		/* if p2p- is not present, then the IFNAMSIZ have reached and name
+		 * would have got reset. In this casse,look for p2p0-x in mon-p2p0-x
+		 */
+			len = 0;
+		}
+		if (ndev && strstr(name, (ndev->name + len))) {
 			if (strlen(ndev->name) > last_name_len) {
 				ndev_found = ndev;
 				last_name_len = strlen(ndev->name);
