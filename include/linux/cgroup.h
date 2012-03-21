@@ -488,7 +488,6 @@ struct cgroup_subsys {
 						  struct cgroup *cgrp);
 	int (*pre_destroy)(struct cgroup_subsys *ss, struct cgroup *cgrp);
 	void (*destroy)(struct cgroup_subsys *ss, struct cgroup *cgrp);
-	int (*allow_attach)(struct cgroup *cgrp, struct cgroup_taskset *tset);
 	int (*can_attach)(struct cgroup_subsys *ss, struct cgroup *cgrp,
 			  struct cgroup_taskset *tset);
 	void (*cancel_attach)(struct cgroup_subsys *ss, struct cgroup *cgrp,
