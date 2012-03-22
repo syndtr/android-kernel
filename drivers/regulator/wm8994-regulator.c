@@ -39,11 +39,10 @@ static int wm8994_ldo_enable(struct regulator_dev *rdev)
 {
 	struct wm8994_ldo *ldo = rdev_get_drvdata(rdev);
 
-	/* If we have no soft control assume that the LDO is always enabled. */
-	if (!ldo->enable)
-		return 0;
+	if (ldo->enable)
+		gpio_set_value_cansleep(ldo->enable, 1);
 
-	gpio_set_value_cansleep(ldo->enable, 1);
+	/* pretend if we always have soft control even when doesn't */
 	ldo->is_enabled = true;
 
 	return 0;
@@ -53,11 +52,10 @@ static int wm8994_ldo_disable(struct regulator_dev *rdev)
 {
 	struct wm8994_ldo *ldo = rdev_get_drvdata(rdev);
 
-	/* If we have no soft control assume that the LDO is always enabled. */
-	if (!ldo->enable)
-		return -EINVAL;
+	if (ldo->enable)
+		gpio_set_value_cansleep(ldo->enable, 0);
 
-	gpio_set_value_cansleep(ldo->enable, 0);
+	/* pretend if we always have soft control even when doesn't */
 	ldo->is_enabled = false;
 
 	return 0;
