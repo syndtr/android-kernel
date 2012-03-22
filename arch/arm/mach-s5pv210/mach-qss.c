@@ -13,6 +13,8 @@
 #include <linux/init.h>
 #include <linux/serial_core.h>
 #include <linux/gpio.h>
+#include <linux/regulator/machine.h>
+#include <linux/regulator/fixed.h>
 
 #include <asm/hardware/vic.h>
 #include <asm/mach/arch.h>
@@ -97,11 +99,41 @@ static struct platform_device qss_ramconsole = {
 	.resource	= ramconsole_resources,
 };
 
+/* dummy regulator for amba */
+
+static struct regulator_consumer_supply dummy_vcore_supplies[] = {
+	{ .supply = "vcore", },
+};
+
+static struct regulator_init_data dummy_vcore_init_data = {
+	.constraints	= {
+		.always_on	= 1,
+	},
+	.num_consumer_supplies	= ARRAY_SIZE(dummy_vcore_supplies),
+	.consumer_supplies	= dummy_vcore_supplies,
+};
+
+static struct fixed_voltage_config dummy_vcore_config = {
+	.supply_name	= "DUMMY_VCORE",
+	.microvolts	= 0,
+	.gpio		= -EINVAL,
+	.init_data	= &dummy_vcore_init_data,
+};
+
+static struct platform_device dummy_vcore = {
+	.name		= "reg-fixed-voltage",
+	.id		= 2,
+	.dev		= {
+		.platform_data	= &dummy_vcore_config,
+	},
+};
+
 static struct platform_device *qss_devices[] __initdata = {
 	&qss_ramconsole,
 	&s3c_device_adc,
 	&s3c_device_rtc,
 	&s3c_device_wdt,
+	&dummy_vcore,
 };
 
 static void __init qss_fixup(struct tag *tag, char **cmdline,
