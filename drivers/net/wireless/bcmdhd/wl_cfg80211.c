@@ -4186,9 +4186,10 @@ exit:
 }
 
 static s32
-wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
-	struct beacon_parameters *info)
+wl_cfg80211_start_ap(struct wiphy *wiphy, struct net_device *dev,
+	struct cfg80211_ap_settings *settings)
 {
+	struct cfg80211_beacon_data *info = &settings->beacon;
 	s32 err = BCME_OK;
 	bcm_tlv_t *ssid_ie;
 	wlc_ssid_t ssid;
@@ -4211,8 +4212,8 @@ wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
 	s32 infra = 1;
 	s32 join_params_size = 0;
 	s32 ap = 0;
-	WL_DBG(("interval (%d) dtim_period (%d) head_len (%d) tail_len (%d)\n",
-		info->interval, info->dtim_period, info->head_len, info->tail_len));
+	WL_DBG(("beacon_interval (%d) dtim_period (%d) head_len (%d) tail_len (%d)\n",
+		settings->beacon_interval, settings->dtim_period, info->head_len, info->tail_len));
 
 	if (wl->p2p_net == dev) {
 		dev = wl_to_prmry_ndev(wl);
@@ -4391,16 +4392,16 @@ wl_cfg80211_add_set_beacon(struct wiphy *wiphy, struct net_device *dev,
 			} else {
 				WL_DBG(("No WPSIE in beacon \n"));
 			}
-			if (info->interval) {
+			if (settings->beacon_interval) {
 				if ((err = wldev_ioctl(dev, WLC_SET_BCNPRD,
-					&info->interval, sizeof(s32), true)) < 0) {
+					&settings->beacon_interval, sizeof(s32), true)) < 0) {
 					WL_ERR(("Beacon Interval Set Error, %d\n", err));
 					return err;
 				}
 			}
-			if (info->dtim_period) {
+			if (settings->dtim_period) {
 				if ((err = wldev_ioctl(dev, WLC_SET_DTIMPRD,
-					&info->dtim_period, sizeof(s32), true)) < 0) {
+					&settings->dtim_period, sizeof(s32), true)) < 0) {
 					WL_ERR(("DTIM Interval Set Error, %d\n", err));
 					return err;
 				}
@@ -4559,8 +4560,7 @@ static struct cfg80211_ops wl_cfg80211_ops = {
 	.mgmt_frame_register = wl_cfg80211_mgmt_frame_register,
 	.change_bss = wl_cfg80211_change_bss,
 	.set_channel = wl_cfg80211_set_channel,
-	.set_beacon = wl_cfg80211_add_set_beacon,
-	.add_beacon = wl_cfg80211_add_set_beacon,
+	.start_ap = wl_cfg80211_start_ap,
 };
 
 s32 wl_mode_to_nl80211_iftype(s32 mode)
@@ -4910,11 +4910,11 @@ wl_notify_connect_status(struct wl_priv *wl, struct net_device *ndev,
 		isfree = true;
 
 		if (event == WLC_E_ASSOC_IND && reason == DOT11_SC_SUCCESS) {
-			cfg80211_rx_mgmt(ndev, freq, mgmt_frame, len, GFP_ATOMIC);
+			cfg80211_rx_mgmt(ndev, freq, 0, mgmt_frame, len, GFP_ATOMIC);
 		} else if (event == WLC_E_DISASSOC_IND) {
-			cfg80211_rx_mgmt(ndev, freq, mgmt_frame, len, GFP_ATOMIC);
+			cfg80211_rx_mgmt(ndev, freq, 0, mgmt_frame, len, GFP_ATOMIC);
 		} else if ((event == WLC_E_DEAUTH_IND) || (event == WLC_E_DEAUTH)) {
-			cfg80211_rx_mgmt(ndev, freq, mgmt_frame, len, GFP_ATOMIC);
+			cfg80211_rx_mgmt(ndev, freq, 0, mgmt_frame, len, GFP_ATOMIC);
 		}
 
 	} else {
@@ -5470,7 +5470,7 @@ wl_notify_rx_mgmt_frame(struct wl_priv *wl, struct net_device *ndev,
 		mgmt_frame = (u8 *)((wl_event_rx_frame_data_t *)rxframe + 1);
 	}
 
-	cfg80211_rx_mgmt(ndev, freq, mgmt_frame, mgmt_frame_len, GFP_ATOMIC);
+	cfg80211_rx_mgmt(ndev, freq, 0, mgmt_frame, mgmt_frame_len, GFP_ATOMIC);
 
 	WL_DBG(("%s: mgmt_frame_len (%d) , e->datalen (%d), channel (%d), freq (%d)\n", __func__,
 		mgmt_frame_len, ntoh32(e->datalen), channel, freq));
