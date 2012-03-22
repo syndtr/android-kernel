@@ -238,8 +238,6 @@ static int wm8994_resume(struct device *dev)
 	int ret, i;
 	int pulls = 0;
 
-	dev_err(dev, "Resume\n");
-
 	ret = regulator_bulk_enable(wm8994->num_supplies,
 				    wm8994->supplies);
 	if (ret != 0) {
