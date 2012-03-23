@@ -190,6 +190,9 @@ struct wm8994_pdata {
 	/* WM8994 microphone bias callback */
 	void (*set_bias_level)(enum snd_soc_bias_level level);
 
+	/* Configure WM1811 jack detection for use with external capacitor */
+	unsigned int jd_ext_cap:1;
+
 	/* WM8958 microphone bias configuration */
 	int micbias[2];
 
